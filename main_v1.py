@@ -61,6 +61,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 def build_paths(lang: str):
     title, slug = lang, lang.lower()
     out_dir = ROOT / f"Python_Scripts_Resulam_Phrasebooks_Audio_Processing/{title}Homework"
+    os.makedirs(out_dir, exist_ok=True)
     return {
         "language": title,
         "slug": slug,
