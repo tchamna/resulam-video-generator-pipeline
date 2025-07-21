@@ -1,0 +1,42 @@
+# --- Python basics -------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+*.egg
+.DS_Store
+.idea/
+.vscode/
+.env
+.venv/
+venv/
+venv_v1/
+dist/
+build/
+
+# --- Jupyter & IPython --------------------------------------------
+.ipynb_checkpoints/
+*.ipynb
+
+# --- Logs & misc ---------------------------------------------------
+*.log
+*.tmp
+*.temp
+tmp-*.m4a          # temp audio created by MoviePy
+*.tmp.mp4          # temp video before rename
+*.csv
+*.sqlite
+*.db
+
+# --- Project-specific large outputs --------------------------------
+Python_Scripts_Resulam_Phrasebooks_Audio_Processing/
+Languages/*Phrasebook/*Only/
+Backgrounds_Selected/
+# comment the line below if you DO want finished videos tracked
+*.mp4
+*.m4a
+*.wav
+*.png
+*.jpg
+*.jpeg
