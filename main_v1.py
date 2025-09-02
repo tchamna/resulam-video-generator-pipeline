@@ -33,6 +33,8 @@ PYTHON_JOBS = min(PYTHON_JOBS,
 
 # ── BASIC PATH / FONT SETTINGS ───────────────────────────────────────────
 LANGUAGE     = "Yoruba"
+# LANGUAGE     = "Nufi"
+LANGUAGE     = "Duala"
 
 ROOT         = Path(r"G:\My Drive\Data_Science\Resulam\Phrasebook_Audio_Video_Processing_production")
 FONT_PATH    = Path(r"C:\Users\tcham\OneDrive\Documents\Workspace_Codes\dictionnaire-nufi-franc-nufi"
@@ -53,24 +55,33 @@ INTRO_LINES = {
     "Nufi":    "Yū' Mfʉ́ɑ́'sí, Mfāhngə́ə́:",
     "Swahili": "Sikiliza, rudia na tafsiri:",
     "Yoruba":  "Tẹ́tí gbọ́, tunsọ, ṣe ògbùfọ̀:",
+    "Duala":  "Seŋgâ, Timbísɛ́lɛ̂ na Túkwâ:",
 }
 DEFAULT_INTRO = "Listen, repeat and translate:"
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ── PATH HELPERS ─────────────────────────────────────────────────────────
+
 def build_paths(lang: str):
-    title, slug = lang, lang.lower()
-    out_dir = ROOT / f"Python_Scripts_Resulam_Phrasebooks_Audio_Processing/{title}Homework"
+    lang_title, lang_lower = lang.title(), lang.lower()
+    out_dir = ROOT / f"Python_Scripts_Resulam_Phrasebooks_Audio_Processing/{lang_title}Homework"
     os.makedirs(out_dir, exist_ok=True)
+
+    # background dir fallback
+    bg_dir = ROOT / "Backgrounds_Selected" / lang_title
+    if not bg_dir.exists():
+        bg_dir = ROOT / "Backgrounds_Selected"
+
     return {
-        "language": title,
-        "slug": slug,
-        "bg_dir":   ROOT / "Backgrounds_Selected",
-        "nufi_dir": ROOT / f"Languages/{title}Phrasebook/{title}Only",
-        "eng_dir":  ROOT / "EnglishOnly",
-        "out_dir":  out_dir,
-        "sent_txt": ROOT / f"Languages/{title}Phrasebook/{slug}_english_french_phrasebook_sentences_list.txt",
+        "language": lang_title,
+        "lang_lower": lang_lower,
+        "bg_dir": bg_dir,
+        "nufi_dir": ROOT / f"Languages/{lang_title}Phrasebook/{lang_title}Only",
+        "eng_dir": ROOT / "EnglishOnly",
+        "out_dir": out_dir,
+        "sent_txt": ROOT / f"Languages/{lang_title}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt",
     }
+
 
 def list_backgrounds(dir_: Path):
     imgs = [p for ext in ("*.png","*.jpg","*.jpeg") for p in dir_.glob(ext)]
@@ -79,7 +90,7 @@ def list_backgrounds(dir_: Path):
     return imgs
 
 # ── SENTENCE PARSER ──────────────────────────────────────────────────────
-def parse_sentences(txt: Path, slug: str):
+def parse_sentences(txt: Path, lang_lower: str):
     rows=[]
     with open(txt, encoding="utf-8") as fh:
         for ln in fh:
@@ -94,7 +105,7 @@ def parse_sentences(txt: Path, slug: str):
                     "source": src,
                     "english": en,
                     "french": fr,
-                    "nufi_mp3": f"{slug}_phrasebook_{sid}.mp3",
+                    "nufi_mp3": f"{lang_lower}_phrasebook_{sid}.mp3",
                     "eng_mp3":  f"english_{sid}.mp3",
                 })
             except ValueError:
@@ -149,7 +160,7 @@ def add_cap(lst, txt, start, dur, y, color, fs, wrap=True, align="center"):
 
 # ── VIDEO BUILDER ────────────────────────────────────────────────────────
 def build_video(s, p):
-    out = p["out_dir"] / f"{p['slug']}_sentence_{s['id']}.mp4"
+    out = p["out_dir"] / f"{p['lang_lower']}_sentence_{s['id']}.mp4"
     if out.exists(): return
 
     nufi_path = p["nufi_dir"] / s["nufi_mp3"]
@@ -235,18 +246,74 @@ def render_slice(sents, st, ed, p):
                 build_video(row, p)
 
 # ── MAIN PIPELINE ────────────────────────────────────────────────────────
+# lang = LANGUAGE
 def process_language(lang: str):
     p        = build_paths(lang)
-    raw      = parse_sentences(p["sent_txt"], p["slug"])
+    raw      = parse_sentences(p["sent_txt"], p["lang_lower"])
     ranges   = chapter_ranges(raw)
     bgs      = [ensure_bg(b, VIDEO_SIZE) for b in list_backgrounds(p["bg_dir"])]
     sentences= tag_bgs(raw, bgs)
 
+    # ====================================================================
     threads=[]
     for st, ed in ranges:
         t = threading.Thread(target=render_slice,args=(sentences, st, ed, p))
         t.start(); threads.append(t)
     for t in threads: t.join()
+    print(f"✔ Finished {lang}")
+    
+    # ====================================================================
+    # Filter out sentences for which video already exists
+    sentences_to_build = [
+        s for s in sentences
+        if not (p["out_dir"] / f"{p['lang_lower']}_sentence_{s['id']}.mp4").exists()
+    ]
+    if not sentences_to_build:
+        print(f"✔ All videos already built for {lang}")
+        return
+
+    # Split sentences to ranges as before
+    threads = []
+    for st, ed in ranges:
+        # Only use sentences in this range that still need building
+        range_sents = [s for s in sentences_to_build if st <= s["id"] <= ed]
+        if not range_sents:
+            continue
+        t = threading.Thread(target=render_slice, args=(range_sents, st, ed, p))
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+    print(f"✔ Finished {lang}")
+
+# lang = LANGUAGE
+def process_language(lang: str):
+    p        = build_paths(lang)
+    raw      = parse_sentences(p["sent_txt"], p["lang_lower"])
+    ranges   = chapter_ranges(raw)
+    bgs      = [ensure_bg(b, VIDEO_SIZE) for b in list_backgrounds(p["bg_dir"])]
+    sentences= tag_bgs(raw, bgs)
+
+    # Filter out sentences for which video already exists
+    sentences_to_build = [
+        s for s in sentences
+        if not (p["out_dir"] / f"{p['lang_lower']}_sentence_{s['id']}.mp4").exists()
+    ]
+    if not sentences_to_build:
+        print(f"✔ All videos already built for {lang}")
+        return
+
+    # Split sentences to ranges as before
+    threads = []
+    for st, ed in ranges:
+        range_sents = [s for s in sentences_to_build if st <= s["id"] <= ed]
+        if not range_sents:
+            continue
+        t = threading.Thread(target=render_slice, args=(range_sents, st, ed, p))
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
     print(f"✔ Finished {lang}")
 
 # ── ENTRY POINT ──────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ dist/
 build/
 test_moviepy.py
 
+
 # --- Jupyter & IPython --------------------------------------------
 .ipynb_checkpoints/
 *.ipynb

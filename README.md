@@ -21,6 +21,12 @@ A python script to generate educational language-learning videos with multi-lang
 You **must** use the specific versions below.  
 Newer versions (e.g., MoviePy 2.x or Pillow 10+) will cause errors due to API changes and deprecations (notably `Image.ANTIALIAS`).
 
+# Audio Processing
+![alt text](audio_processing.png)
+
+# Video Processing
+![alt text](<pipeline.jpg>)
+
 ### Required Versions
 
 ```txt
