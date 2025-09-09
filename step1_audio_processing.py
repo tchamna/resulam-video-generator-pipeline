@@ -85,6 +85,62 @@ def extract_audios_and_move_original(base_path: Path, ext: str = ".mp3"):
     print(f"Extracted {len(audio_files)} audio files to {base_path} and moved subdirectories to 'original_audios'")
     return natsorted(audio_files)
 
+# ─── Helper: Get Subdirectories ─────────────────────────────────────────
+def check_subdirectories(path: Path):
+    return [p for p in path.iterdir() if p.is_dir()]
+
+# ─── Audio Extraction ───────────────────────────────────────────────────
+def extract_audios_and_move_original(base_path: Path, ext: str = ".mp3"):
+    audio_files = []
+    original_dir = base_path / "original_audios"
+    os.makedirs(original_dir, exist_ok=True)
+
+    # To move folders after walk completes
+    subdirs_to_move = []
+
+    for root, dirs, files in os.walk(base_path):
+        root_path = Path(root)
+
+        # Skip original_audios folder and its children
+        if root_path == original_dir or original_dir in root_path.parents:
+            continue
+
+        # Flag to track .mp3 presence
+        has_mp3 = False
+
+        for f in files:
+            if f.endswith(ext):
+                has_mp3 = True
+                src = root_path / f
+                dest = base_path / f
+                try:
+                    if src.resolve() != dest.resolve():
+                        shutil.copy(src, dest)
+                        audio_files.append(dest)
+                    else:
+                        print(f"⚠️ Skipped copying '{src.name}' (source and destination are the same).")
+                except Exception as e:
+                    print(f"❌ Error copying {src.name}: {e}")
+
+        if not has_mp3:
+            print(f"⚠️ Skipped '{root_path.name}': No *{ext} files found.")
+
+        # Save top-level subdirectories (excluding base path itself)
+        if root_path != base_path and root_path.parent == base_path:
+            subdirs_to_move.append(root_path)
+
+    # ─── Move subdirectories after processing ─────────────────────────────
+    for subdir in subdirs_to_move:
+        if subdir.name != "original_audios":
+            try:
+                shutil.move(str(subdir), original_dir / subdir.name)
+            except Exception as e:
+                print(f"❌ Error moving folder '{subdir}': {e}")
+
+    print(f"\n✅ Extracted {len(audio_files)} audio files to {base_path}")
+    print(f"📁 Moved {len(subdirs_to_move)} subdirectories to '{original_dir.name}'")
+    return natsorted(audio_files)
+
 # ─── Silence Detection and Splitting ────────────────────────────────────
 def split_audio_on_silence(audio_path: Path, min_silence_len=1500, silence_thresh=-40):
     audio = AudioSegment.from_file(audio_path)
@@ -94,6 +150,8 @@ def split_audio_on_silence(audio_path: Path, min_silence_len=1500, silence_thres
                                        keep_silence=0)  # Remove all silence
     return chunks
 # ─── File Renaming ──────────────────────────────────────────────────────
+
+# directory = local_audio_path
 def files_rename(directory, prefix="", suffix="", replace="", by="", 
                  remove_first=0, remove_last=0,
                  lower_all=False, upper_all=True,

@@ -29,8 +29,8 @@ from moviepy.editor import (
 
 # ── USER SELECTIONS ──────────────────────────────────────────────────────
 LANGUAGE = "Duala"         # e.g., "Nufi", "Yoruba", "Duala", "Swahili", "Fe'efe'e"
-# MODE     = "lecture"       # "lecture" or "homework"
-MODE     = "homework"       # "lecture" or "homework"
+MODE     = "lecture"       # "lecture" or "homework"
+# MODE     = "homework"       # "lecture" or "homework"
 
 # ── PARALLELISM SETTINGS ────────────────────────────────────────────────
 FFMPEG_THREADS_PER_JOB = 4
@@ -43,10 +43,12 @@ PYTHON_JOBS = min(PYTHON_JOBS, max(1, logical // FFMPEG_THREADS_PER_JOB))
 
 # ── BASIC PATH / FONT SETTINGS ───────────────────────────────────────────
 ROOT      = Path(r"G:\My Drive\Data_Science\Resulam\Phrasebook_Audio_Video_Processing_production")
-FONT_PATH = Path(r"C:\Users\tcham\OneDrive\Documents\Workspace_Codes\dictionnaire-nufi-franc-nufi"
-                 r"\app\src\main\assets\fonts\CharisSIL-B.ttf")
-LOGO_PATH = Path(r"G:\My Drive\Data_Science\Resulam\Phrasebook_Audio_Video_Processing_production_Backup"
-                 r"\resulam_logo_resurrectionLangue.png")
+# FONT_PATH = Path(r"C:\Users\tcham\OneDrive\Documents\Workspace_Codes\dictionnaire-nufi-franc-nufi"
+#                  r"\app\src\main\assets\fonts\CharisSIL-B.ttf")
+
+# FONT_PATH = Path(r"C:\Windows\Fonts\arialbd.ttf")
+FONT_PATH = ROOT/Path(r"Fonts\arialbd.ttf")
+LOGO_PATH = ROOT/Path(r"resulam_logo_resurrectionLangue.png")
 
 VIDEO_SIZE        = (1920, 1080)
 FPS               = 24
@@ -56,6 +58,14 @@ BASE_FS           = 100
 BANNER_GAP_RATIO  = 0.30
 RIGHT_MARGIN_PX   = 25
 TOP_MARGIN_PX     = 15
+
+# PROD_OR_TEST = "Production"  # or "Test"
+PROD_OR_TEST = "Test"  # or "Test"
+
+if PROD_OR_TEST == "Test":
+    PROD_OR_TEST = "Test"
+else:
+    PROD_OR_TEST = ""
 
 INTRO_LINES = {
     "Nufi":    "Yū' Mfʉ́ɑ́'sí, Mfāhngə́ə́:",
@@ -88,7 +98,7 @@ def build_paths(lang: str, mode: str) -> Dict[str, Path | str]:
         "language": lang_title,
         "lang_lower": lang_lower,
         "bg_dir": bg_dir,
-        "nufi_dir": ROOT / f"Languages/{lang_title}Phrasebook/{lang_title}Only",
+        "nufi_dir": ROOT / f"Languages/{lang_title}Phrasebook/{lang_title}Only{PROD_OR_TEST}",
         "eng_dir":  ROOT / "EnglishOnly",
         "out_dir":  out_dir,
         "sent_txt": ROOT / f"Languages/{lang_title}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt",
@@ -117,7 +127,7 @@ def parse_sentences(txt: Path, lang_lower: str):
                     "source": src,
                     "english": en,
                     "french": fr,
-                    "nufi_mp3": f"{lang_lower}_phrasebook_{sid}.mp3",
+                    "nufi_mp3": f"{lang_lower}_phrasebook_{sid}_padded.mp3",
                     "eng_mp3":  f"english_{sid}.mp3",
                 })
             except ValueError:
@@ -190,7 +200,7 @@ def build_video(s: Dict, p: Dict, mode: str = "lecture"):
     if out.exists():
         return
 
-    nufi_path = p["nufi_dir"] / s["nufi_mp3"]
+    nufi_path = p["nufi_dir"] / "gen2_normalized_padded"/ s["nufi_mp3"]
     eng_path  = p["eng_dir"]  / s["eng_mp3"]
     if not nufi_path.exists() or not eng_path.exists():
         print(f"⚠ audio missing {s['id']}")
@@ -292,6 +302,8 @@ def build_video(s: Dict, p: Dict, mode: str = "lecture"):
 
 # ── THREAD WORKER ────────────────────────────────────────────────────────
 sem = threading.Semaphore(PYTHON_JOBS)
+
+# sents = range_sents
 
 def render_slice(sents: List[Dict], st: int, ed: int, p: Dict, mode: str):
     with sem:
