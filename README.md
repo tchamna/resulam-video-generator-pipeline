@@ -1,13 +1,15 @@
 # Multi-Language Audio Processing and Video Generator
 
-![image](https://github.com/tchamna/audio_to_video_processing/assets/6007035/49da43a9-b244-45b6-8d88-10e7ce54f484)
+<!-- ![image](https://github.com/tchamna/audio_to_video_processing/assets/6007035/49da43a9-b244-45b6-8d88-10e7ce54f484) -->
+
+![Demo of pipeline result](assets/demo_image1.png)
 
 This Python script is an automated video production pipeline for creating educational language-learning videos. It generates videos with synchronized multi-language text overlays, dynamic background images, and custom branding from audio files and sentence lists. Optimized for the "Guide de conversation trilingue" series, this tool streamlines the creation of engaging content for African languages.
 
 The pipeline consists of modular, independent scripts. Each module can be executed separately, provided the necessary audio, text, and image resources are available.
 
 
-![alt text](<pipeline.jpg>)
+![alt text](<assets/demo_pipeline.jpg>)
 
 ## Core Features ✨
 
@@ -43,7 +45,7 @@ For streamlined installation, use the provided requirements.txt file:
  
 
 # Step 1: Audio Processing 
-![alt text](audio_processing.png)
+![Demo audio processing](assets/audio_processing.png)
 
 The audio processing module prepares raw audio files for video integration. This is a crucial first step in the pipeline.
 
@@ -76,8 +78,10 @@ Organize your files as follows
 # Step 2: Video Production Pipeline
 
 This module creates videos by combining the prepared audio and text files with visual assets.
+<!-- 
+![image](https://github.com/tchamna/audio_to_video_processing/assets/6007035/acf1ffbd-e777-4093-af2b-6b9d0f2ac5c6) -->
 
-![image](https://github.com/tchamna/audio_to_video_processing/assets/6007035/acf1ffbd-e777-4093-af2b-6b9d0f2ac5c6)
+!["demo resulting video](assets/demo_image2.png)
 
 ## Additional Folders For Video Production
 
@@ -101,7 +105,9 @@ This module creates videos by combining the prepared audio and text files with v
 
 * **Start Point Control**: Enables the user to specify a starting sentence number for video production, allowing for easy resumption of a paused task.
 
-![image](https://github.com/tchamna/audio_to_video_processing/assets/6007035/3433de0d-ec39-4c9a-bce0-5c0ae9dd80fa)
+<!-- ![image](https://github.com/tchamna/audio_to_video_processing/assets/6007035/3433de0d-ec39-4c9a-bce0-5c0ae9dd80fa) -->
+
+!["demo image 2"](assets/demo_image3.png)
 
 [Amazon link to the book series](https://www.amazon.com/dp/B099TNLQL2)
 
