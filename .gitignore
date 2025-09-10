@@ -39,6 +39,6 @@ Backgrounds_Selected/
 *.mp4
 *.m4a
 *.wav
-*.png
-*.jpg
-*.jpeg
+# *.png
+# *.jpg
+# *.jpeg
