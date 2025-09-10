@@ -30,6 +30,7 @@ from moviepy.editor import (
 # ── USER SELECTIONS ──────────────────────────────────────────────────────
 LANGUAGE = "Duala"         # e.g., "Nufi", "Yoruba", "Duala", "Swahili", "Fe'efe'e"
 MODE     = "lecture"       # "lecture" or "homework"
+rebuild_video = False  # if True, rebuilds all videos even if they exist
 # MODE     = "homework"       # "lecture" or "homework"
 
 # ── PARALLELISM SETTINGS ────────────────────────────────────────────────
@@ -191,14 +192,21 @@ def add_cap(lst: List, txt: str, start: float, dur: float,
 
 
 # ── SINGLE VIDEO BUILDER (mode switch) ───────────────────────────────────
-def build_video(s: Dict, p: Dict, mode: str = "lecture"):
+# s = row 
+def build_video(s: Dict, p: Dict, mode: str = "lecture",rebuild_video=False) -> None:
     """
     mode="lecture": all captions visible entire duration; audio = English → pause → Local.
     mode="homework": intro + staged captions; audio = Local×3 (with pauses) → English.
     """
     out = p["out_dir"] / f"{p['lang_lower']}_sentence_{s['id']}.mp4"
+    
+    # Do not build if already exists
+        
     if out.exists():
-        return
+        if not rebuild_video:   
+            print(f"✔ already exists: {out.name}")
+            return
+        
 
     nufi_path = p["nufi_dir"] / "gen2_normalized_padded"/ s["nufi_mp3"]
     eng_path  = p["eng_dir"]  / s["eng_mp3"]
@@ -304,12 +312,12 @@ def build_video(s: Dict, p: Dict, mode: str = "lecture"):
 sem = threading.Semaphore(PYTHON_JOBS)
 
 # sents = range_sents
-
+# row = sents[3]
 def render_slice(sents: List[Dict], st: int, ed: int, p: Dict, mode: str):
     with sem:
         for row in sents:
             if st <= row["id"] <= ed:
-                build_video(row, p, mode)
+                build_video(row, p, mode,rebuild_video)
 
 # ── MAIN PIPELINE ────────────────────────────────────────────────────────
 # lang = LANGUAGE
@@ -321,11 +329,14 @@ def process_language(lang: str, mode: str):
     bgs      = [ensure_bg(b, VIDEO_SIZE) for b in list_backgrounds(p["bg_dir"])]
     sentences= tag_bgs(raw, bgs)
 
-    # Skip sentences already built
-    sentences_to_build = [
-        s for s in sentences
-        if not (p["out_dir"] / f"{p['lang_lower']}_sentence_{s['id']}.mp4").exists()
-    ]
+    # # Skip sentences already built
+    # sentences_to_build = [
+    #     s for s in sentences
+    #     if not (p["out_dir"] / f"{p['lang_lower']}_sentence_{s['id']}.mp4").exists()
+    # ]
+    
+    sentences_to_build = sorted(sentences, key=lambda x: x["id"])
+    
     if not sentences_to_build:
         print(f"✔ All videos already built for {lang} [{mode}]")
         return
