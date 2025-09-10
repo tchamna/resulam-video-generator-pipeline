@@ -1,6 +1,5 @@
 # Multi-Language Audio Processing and Video Generator
 
-<!-- ![image](https://github.com/tchamna/audio_to_video_processing/assets/6007035/49da43a9-b244-45b6-8d88-10e7ce54f484) -->
 
 ![Demo of pipeline result](assets/demo_image1.png)
 
@@ -78,8 +77,7 @@ Organize your files as follows
 # Step 2: Video Production Pipeline
 
 This module creates videos by combining the prepared audio and text files with visual assets.
-<!-- 
-![image](https://github.com/tchamna/audio_to_video_processing/assets/6007035/acf1ffbd-e777-4093-af2b-6b9d0f2ac5c6) -->
+
 
 !["demo resulting video](assets/demo_image2.png)
 
@@ -105,7 +103,7 @@ This module creates videos by combining the prepared audio and text files with v
 
 * **Start Point Control**: Enables the user to specify a starting sentence number for video production, allowing for easy resumption of a paused task.
 
-<!-- ![image](https://github.com/tchamna/audio_to_video_processing/assets/6007035/3433de0d-ec39-4c9a-bce0-5c0ae9dd80fa) -->
+
 
 !["demo image 2"](assets/demo_image3.png)
 
