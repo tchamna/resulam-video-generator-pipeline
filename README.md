@@ -1,14 +1,15 @@
 # Multi-Language Audio Processing and Video Generator
 
 
-![Demo of pipeline result](assets/demo_image1.png)
+![alt text](<assets/demo_pipeline.jpg>)
+
 
 This Python script is an automated video production pipeline for creating educational language-learning videos. It generates videos with synchronized multi-language text overlays, dynamic background images, and custom branding from audio files and sentence lists. Optimized for the "Guide de conversation trilingue" series, this tool streamlines the creation of engaging content for African languages.
 
 The pipeline consists of modular, independent scripts. Each module can be executed separately, provided the necessary audio, text, and image resources are available.
 
 
-![alt text](<assets/demo_pipeline.jpg>)
+![Demo of pipeline result](assets/demo_image1.png)
 
 ## Core Features ✨
 
