@@ -1,23 +1,7 @@
-"""
-multi_language_video_generator.py  • single build_video(mode)
-────────────────────────────────────────────────────────────────────────────
-• LANGUAGE switch: "Nufi", "Yoruba", "Duala", …
-• One background per chapter (detects “Chapter …” lines)
-• CPU-aware parallelism (FFMPEG_THREADS_PER_JOB × PYTHON_JOBS)
-• Header layout
-      <Language>   ……   “Please Support Resulam”
-      sentence-number        (next row, right-aligned)
-• Logos resized to 100 px
-• Modes:
-   - homework: intro + 3× local repeats → English  → saves under .../<Language>/Homework
-   - lecture : all texts visible; English → pause → local → saves under .../<Language>/Lecture
-
-Usage:
-   # Set MODE = "lecture" or "homework" below, then run this file.
-"""
-
 from __future__ import annotations
-import os, sys, shutil, threading
+import os
+import shutil
+import threading
 from pathlib import Path
 from uuid import uuid4
 from typing import List, Dict
@@ -27,332 +11,395 @@ from moviepy.editor import (
     ImageClip, TextClip,
 )
 
-# ── USER SELECTIONS ──────────────────────────────────────────────────────
-LANGUAGE = "Duala"         # e.g., "Nufi", "Yoruba", "Duala", "Swahili", "Fe'efe'e"
-MODE     = "lecture"       # "lecture" or "homework"
-rebuild_video = False  # if True, rebuilds all videos even if they exist
-# MODE     = "homework"       # "lecture" or "homework"
+# ── USER SETTINGS ───────────────────────────────────────────────────────
+LANGUAGE = "Duala"          # e.g., "Nufi", "Yoruba", "Duala"
+MODE = "lecture"            # "lecture" or "homework"
+# MODE = "homework"            # "lecture" or "homework"
+REBUILD_ALL = False         # Force regeneration of existing videos
+REBUILD_ALL = True         # Force regeneration of existing videos
 
-# ── PARALLELISM SETTINGS ────────────────────────────────────────────────
-FFMPEG_THREADS_PER_JOB = 4
-PYTHON_JOBS            = 5
+# ── PARALLELISM CONFIG ──────────────────────────────────────────────────
+FFMPEG_THREADS = 4
+MAX_PARALLEL_JOBS = 5
+AVAILABLE_CPUS = os.cpu_count() or 1
 
-logical = os.cpu_count() or 1
-while FFMPEG_THREADS_PER_JOB > logical:
-    FFMPEG_THREADS_PER_JOB //= 2 or 1
-PYTHON_JOBS = min(PYTHON_JOBS, max(1, logical // FFMPEG_THREADS_PER_JOB))
+while FFMPEG_THREADS > AVAILABLE_CPUS:
+    FFMPEG_THREADS = max(1, FFMPEG_THREADS // 2)
+MAX_PARALLEL_JOBS = min(MAX_PARALLEL_JOBS, AVAILABLE_CPUS // FFMPEG_THREADS)
 
-# ── BASIC PATH / FONT SETTINGS ───────────────────────────────────────────
-ROOT      = Path(r"G:\My Drive\Data_Science\Resulam\Phrasebook_Audio_Video_Processing_production")
-# FONT_PATH = Path(r"C:\Users\tcham\OneDrive\Documents\Workspace_Codes\dictionnaire-nufi-franc-nufi"
-#                  r"\app\src\main\assets\fonts\CharisSIL-B.ttf")
+# ── PATHS AND FONTS ─────────────────────────────────────────────────────
+ROOT_DIR = Path(r"G:\My Drive\Data_Science\Resulam\Phrasebook_Audio_Video_Processing_production")
+FONT_PATH = ROOT_DIR / "Fonts" / "arialbd.ttf"
+LOGO_PATH = ROOT_DIR / "resulam_logo_resurrectionLangue.png"
 
-# FONT_PATH = Path(r"C:\Windows\Fonts\arialbd.ttf")
-FONT_PATH = ROOT/Path(r"Fonts\arialbd.ttf")
-LOGO_PATH = ROOT/Path(r"resulam_logo_resurrectionLangue.png")
+VIDEO_RESOLUTION = (1920, 1080)
+FRAME_RATE = 24
+REPEAT_PAUSE_SECONDS = 5
+TRAILING_PAUSE_SECONDS = 3
+DEFAULT_FONT_SIZE = 100
+HEADER_GAP_RATIO = 0.30
+MARGIN_RIGHT = 25
+MARGIN_TOP = 15
 
-VIDEO_SIZE        = (1920, 1080)
-FPS               = 24
-PAUSE_BTWN_REPEAT = 5
-FINAL_PAUSE       = 3
-BASE_FS           = 100
-BANNER_GAP_RATIO  = 0.30
-RIGHT_MARGIN_PX   = 25
-TOP_MARGIN_PX     = 15
+PROJECT_MODE = "Test"  # or "Production"
 
-# PROD_OR_TEST = "Production"  # or "Test"
-PROD_OR_TEST = "Test"  # or "Test"
-
-if PROD_OR_TEST == "Test":
-    PROD_OR_TEST = "Test"
-else:
-    PROD_OR_TEST = ""
-
-INTRO_LINES = {
-    "Nufi":    "Yū' Mfʉ́ɑ́'sí, Mfāhngə́ə́:",
+INTRO_MESSAGES = {
+    "Nufi": "Yū' Mfʉ́ɑ́'sí, Mfāhngə́ə́:",
     "Swahili": "Sikiliza, rudia na tafsiri:",
-    "Yoruba":  "Tẹ́tí gbọ́, tunsọ, ṣe ògbùfọ̀:",
-    "Duala":   "Seŋgâ, Timbísɛ́lɛ̂ na Túkwâ:",
+    "Yoruba": "Tẹ́tí gbọ́, tunsọ, ṣe ògbùfọ̀:",
+    "Duala": "Seŋgâ, Timbísɛ́lɛ̂ na Túkwâ:",
 }
 DEFAULT_INTRO = "Listen, repeat and translate:"
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-# ── PATH HELPERS ─────────────────────────────────────────────────────────
-def build_paths(lang: str, mode: str) -> Dict[str, Path | str]:
-    """Return standardized paths; write outputs into Lecture/Homework subfolders based on mode."""
-    lang_title, lang_lower = lang.title(), lang.lower()
+# ── PATH SETUP ──────────────────────────────────────────────────────────
+def get_project_paths(language: str, mode: str) -> Dict[str, Path | str]:
+    language_title = language.title()
+    language_lower = language.lower()
+    mode_folder = "Lecture" if mode.lower() == "lecture" else "Homework"
 
-    # Output directory split by mode
-    mode_norm = "Lecture" if mode.lower().strip() == "lecture" else "Homework"
-    out_dir = ROOT / f"Python_Scripts_Resulam_Phrasebooks_Audio_Processing" / lang_title / mode_norm
-    os.makedirs(out_dir, exist_ok=True)
+    output_dir = ROOT_DIR / "Python_Scripts_Resulam_Phrasebooks_Audio_Processing" / language_title / mode_folder
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Background fallback: <Language> → Common → parent folder
-    cand = ROOT / "Backgrounds_Selected" / lang_title
-    if cand.exists():
-        bg_dir = cand
-    else:
-        common = ROOT / "Backgrounds_Selected" / "Common"
-        bg_dir = common if common.exists() else (ROOT / "Backgrounds_Selected")
+    background_dir = ROOT_DIR / "Backgrounds_Selected" / language_title
+    if not background_dir.exists():
+        background_dir = ROOT_DIR / "Backgrounds_Selected" / "Common"
 
     return {
-        "language": lang_title,
-        "lang_lower": lang_lower,
-        "bg_dir": bg_dir,
-        "nufi_dir": ROOT / f"Languages/{lang_title}Phrasebook/{lang_title}Only{PROD_OR_TEST}",
-        "eng_dir":  ROOT / "EnglishOnly",
-        "out_dir":  out_dir,
-        "sent_txt": ROOT / f"Languages/{lang_title}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt",
+        "language": language_title,
+        "lang_lower": language_lower,
+        "background_dir": background_dir,
+        "local_audio_dir": ROOT_DIR / f"Languages/{language_title}Phrasebook/{language_title}Only{PROJECT_MODE}" / "gen2_normalized_padded",
+        "english_audio_dir": ROOT_DIR / "EnglishOnly",
+        "output_dir": output_dir,
+        "sentence_file": ROOT_DIR / f"Languages/{language_title}Phrasebook/{language_lower}_english_french_phrasebook_sentences_list.txt",
     }
 
-def list_backgrounds(dir_: Path) -> List[Path]:
-    imgs = [p for ext in ("*.png","*.jpg","*.jpeg") for p in dir_.glob(ext)]
-    if not imgs:
-        raise RuntimeError(f"No backgrounds in {dir_}")
-    return imgs
-
-# ── SENTENCE PARSER ──────────────────────────────────────────────────────
-
-def parse_sentences(txt: Path, lang_lower: str):
-    rows=[]
-    with open(txt, encoding="utf-8") as fh:
-        for ln in fh:
-            if "|" not in ln: continue
+# ── PARSE SENTENCE FILE ─────────────────────────────────────────────────
+def load_sentences(txt_file: Path, lang_code: str) -> List[Dict]:
+    sentences = []
+    with open(txt_file, encoding="utf-8") as file:
+        for line in file:
+            if "|" not in line:
+                continue
             try:
-                id_part, en_raw = ln.split(")", 1)
-                sid = int(id_part.strip())
-                _, src, fr = [x.strip() for x in ln.strip().split("|", 2)]
-                en = en_raw.split("|", 1)[0].strip()
-                rows.append({
-                    "id": sid,
-                    "source": src,
-                    "english": en,
-                    "french": fr,
-                    "nufi_mp3": f"{lang_lower}_phrasebook_{sid}_padded.mp3",
-                    "eng_mp3":  f"english_{sid}.mp3",
+                id_part, english_raw = line.split(")", 1)
+                sentence_id = int(id_part.strip())
+                _, local, french = [x.strip() for x in line.strip().split("|", 2)]
+                english = english_raw.split("|", 1)[0].strip()
+                sentences.append({
+                    "id": sentence_id,
+                    "source": local,
+                    "english": english,
+                    "french": french,
+                    "local_audio": f"{lang_code}_phrasebook_{sentence_id}_padded.mp3",
+                    "english_audio": f"english_{sentence_id}.mp3",
                 })
             except ValueError:
-                print(f"⚠ bad line: {ln.strip()}")
-    return rows
+                print(f"⚠ Invalid line format: {line.strip()}")
+    return sentences
 
-# ── CHAPTER RANGES ───────────────────────────────────────────────────────
-def chapter_ranges(sents: List[Dict]) -> List[tuple]:
-    ranges, start = [], None
-    prev = None
-    for s in sorted(sents, key=lambda x: x["id"]):
+# ── CHAPTER DETECTION ───────────────────────────────────────────────────
+def get_chapter_ranges(sentences: List[Dict]) -> List[tuple]:
+    ranges = []
+    start_id = None
+    previous_id = None
+    for s in sorted(sentences, key=lambda x: x["id"]):
         if s["english"].lower().startswith("chapter"):
-            if start is not None and prev is not None:
-                ranges.append((start, prev))
-            start = s["id"]
-        prev = s["id"]
-    if start is not None and prev is not None:
-        ranges.append((start, prev))
-    if not ranges and sents:
-        ids = sorted(x["id"] for x in sents)
-        ranges = [(ids[0], ids[-1])]
+            if start_id is not None and previous_id is not None:
+                ranges.append((start_id, previous_id))
+            start_id = s["id"]
+        previous_id = s["id"]
+    if start_id and previous_id:
+        ranges.append((start_id, previous_id))
+    if not ranges and sentences:
+        ids = [s["id"] for s in sentences]
+        ranges = [(min(ids), max(ids))]
     return ranges
 
-# ── BACKGROUND UTILITIES ────────────────────────────────────────────────
-def ensure_bg(img: Path, tgt=VIDEO_SIZE) -> Path:
-    with Image.open(img) as im:
-        if im.size == tgt:
-            return img
-        even = (tgt[0] - tgt[0] % 2, tgt[1] - tgt[1] % 2)
-        try:
-            out = img.with_stem(img.stem + "_resized")
-        except AttributeError:
-            out = img.with_name(img.stem + "_resized" + img.suffix)
-        im.resize(even, Image.LANCZOS).save(out)
-        return out
+# ── BACKGROUND IMAGE RESIZING ───────────────────────────────────────────
+def resize_background(image_path: Path, target_size=VIDEO_RESOLUTION) -> Path:
+    with Image.open(image_path) as img:
+        if img.size == target_size:
+            return image_path
+        even_dims = (target_size[0] - target_size[0] % 2, target_size[1] - target_size[1] % 2)
+        resized_path = image_path.with_stem(image_path.stem + "_resized")
+        img.resize(even_dims, Image.LANCZOS).save(resized_path)
+        return resized_path
 
-def tag_bgs(sents: List[Dict], bgs: List[Path]) -> List[Dict]:
-    idx, cur, out = -1, bgs[0], []
-    for s in sorted(sents, key=lambda x: x["id"]):
-        if s["english"].lower().startswith("chapter"):
-            idx = (idx + 1) % len(bgs)
-            cur = bgs[idx]
-        d = dict(s); d["bg"] = cur; out.append(d)
-    return out
+# ── ATTACH BACKGROUND TO SENTENCES ──────────────────────────────────────
+def assign_backgrounds(sentences: List[Dict], backgrounds: List[Path]) -> List[Dict]:
+    current_idx = -1
+    current_bg = backgrounds[0]
+    result = []
+    for sentence in sorted(sentences, key=lambda x: x["id"]):
+        if sentence["english"].lower().startswith("chapter"):
+            current_idx = (current_idx + 1) % len(backgrounds)
+            current_bg = backgrounds[current_idx]
+        sentence_copy = sentence.copy()
+        sentence_copy["background"] = current_bg
+        result.append(sentence_copy)
+    return result
 
-# ── CAPTION HELPERS ─────────────────────────────────────────────────────
-def font_size(s: Dict) -> int:
-    n = len(f"{s['source']} {s['english']} {s['french']}")
-    return (BASE_FS if n < 50 else int(BASE_FS*0.85) if n < 80
-            else int(BASE_FS*0.75) if n < 110 else int(BASE_FS*0.65))
+# ── FONT UTILITY ────────────────────────────────────────────────────────
+def calculate_font_size(sentence: Dict) -> int:
+    total_chars = len(f"{sentence['source']} {sentence['english']} {sentence['french']}")
+    if total_chars < 50:
+        return DEFAULT_FONT_SIZE
+    elif total_chars < 80:
+        return int(DEFAULT_FONT_SIZE * 0.85)
+    elif total_chars < 110:
+        return int(DEFAULT_FONT_SIZE * 0.75)
+    return int(DEFAULT_FONT_SIZE * 0.65)
 
-def add_cap(lst: List, txt: str, start: float, dur: float,
-            y: int, color: str, fs: int, wrap=True, align="center") -> int:
-    mode = "caption" if wrap else "label"
-    size = (VIDEO_SIZE[0]-200, None) if wrap else None
-    clip = (TextClip(txt, font=str(FONT_PATH), fontsize=fs, color=color,
-                     method=mode, size=size)
-            .set_position((align, y)).set_start(start).set_duration(dur))
-    lst.append(clip)
-    return y + clip.h + int(fs*0.20)
+# ── BUILD SINGLE VIDEO ──────────────────────────────────────────────────
 
-
-# ── SINGLE VIDEO BUILDER (mode switch) ───────────────────────────────────
-# s = row 
-def build_video(s: Dict, p: Dict, mode: str = "lecture",rebuild_video=False) -> None:
+def create_video_clip(sentence: Dict, paths: Dict, mode: str):
     """
-    mode="lecture": all captions visible entire duration; audio = English → pause → Local.
-    mode="homework": intro + staged captions; audio = Local×3 (with pauses) → English.
+    Build a single video clip for one sentence.
+    Shows correct sentence ID in header and captions (source, english, french).
     """
-    out = p["out_dir"] / f"{p['lang_lower']}_sentence_{s['id']}.mp4"
-    
-    # Do not build if already exists
-        
-    if out.exists():
-        if not rebuild_video:   
-            print(f"✔ already exists: {out.name}")
-            return
-        
 
-    nufi_path = p["nufi_dir"] / "gen2_normalized_padded"/ s["nufi_mp3"]
-    eng_path  = p["eng_dir"]  / s["eng_mp3"]
-    if not nufi_path.exists() or not eng_path.exists():
-        print(f"⚠ audio missing {s['id']}")
+    print(f"▶ Creating video for sentence ID {sentence['id']}")
+
+    output_path = paths["output_dir"] / f"{paths['lang_lower']}_sentence_{sentence['id']}.mp4"
+    if output_path.exists() and not REBUILD_ALL:
+        print(f"✔ Skipped (already exists): {output_path.name}")
         return
 
-    eng  = AudioFileClip(str(eng_path))
-    nufi = AudioFileClip(str(nufi_path))
+    local_audio_path = paths["local_audio_dir"] / sentence["local_audio"]
+    english_audio_path = paths["english_audio_dir"] / sentence["english_audio"]
 
-    mode_l = mode.lower().strip()
-    if mode_l == "lecture":
-        # English → (gap) → Local
-        tE        = eng.duration
-        GAP       = PAUSE_BTWN_REPEAT
-        st_local  = tE + GAP
-        total     = st_local + nufi.duration + FINAL_PAUSE
-        audio = CompositeAudioClip([eng.set_start(0), nufi.set_start(st_local)])
-    else:
-        # Homework: Local ×3 (with gaps) → English
-        d   = nufi.duration
-        t2  = d + PAUSE_BTWN_REPEAT
-        t3  = t2 + d + PAUSE_BTWN_REPEAT
-        stE = t3 + d + PAUSE_BTWN_REPEAT
-        total = stE + eng.duration + FINAL_PAUSE
+    if not local_audio_path.exists() or not english_audio_path.exists():
+        print(f"⚠ Missing audio for sentence {sentence['id']}")
+        return
+
+    local_audio = AudioFileClip(str(local_audio_path))
+    english_audio = AudioFileClip(str(english_audio_path))
+
+    # --- Audio sequencing ---
+    if mode == "lecture":
+        total_duration = english_audio.duration + REPEAT_PAUSE_SECONDS + local_audio.duration + TRAILING_PAUSE_SECONDS
         audio = CompositeAudioClip([
-            nufi.set_start(0),
-            nufi.set_start(t2),
-            nufi.set_start(t3),
-            eng.set_start(stE),
+            english_audio.set_start(0),
+            local_audio.set_start(english_audio.duration + REPEAT_PAUSE_SECONDS)
+        ])
+    else:  # homework mode
+        d = local_audio.duration
+        pause = REPEAT_PAUSE_SECONDS
+        nufi_1_start = 0
+        nufi_2_start = d + pause
+        nufi_3_start = nufi_2_start + d + pause
+        eng_start = nufi_3_start + d + pause
+        total_duration = eng_start + english_audio.duration + TRAILING_PAUSE_SECONDS
+
+        audio = CompositeAudioClip([
+            local_audio.set_start(nufi_1_start),
+            local_audio.set_start(nufi_2_start),
+            local_audio.set_start(nufi_3_start),
+            english_audio.set_start(eng_start),
         ])
 
-    fs    = font_size(s)
-    clips = [ImageClip(str(s["bg"])).set_duration(total)]
+    font_size = calculate_font_size(sentence)
+    clips = [ImageClip(str(sentence["background"])).set_duration(total_duration)]
 
-    # Header row
-    language_clip = TextClip(p["language"], font=str(FONT_PATH),
-                             fontsize=int(fs*0.55), color="yellow", method="label")
-    language_clip = language_clip.set_position((15, TOP_MARGIN_PX)).set_duration(total)
-    clips.append(language_clip)
+    def add_text(text, color, start, duration, y_offset, wrap=True):
+        size = (VIDEO_RESOLUTION[0] - 200, None) if wrap else None
+        clip = TextClip(text, font=str(FONT_PATH), fontsize=font_size,
+                        color=color, method="caption" if wrap else "label", size=size)
+        clip = clip.set_position(("center", y_offset)).set_start(start).set_duration(duration)
+        clips.append(clip)
+        return y_offset + clip.h + int(font_size * 0.2)
+
+    # --- Header row ---
+    y_header = MARGIN_TOP
+    clips.append(TextClip(paths["language"], font=str(FONT_PATH),
+                          fontsize=int(font_size * 0.55), color="yellow", method="label")
+                 .set_position((15, y_header)).set_duration(total_duration))
 
     support_clip = TextClip("Please Support Resulam", font=str(FONT_PATH),
-                            fontsize=int(fs*0.5), color="yellow", method="label")
-    support_clip = support_clip.set_position(("right", TOP_MARGIN_PX)).set_duration(total)
+                            fontsize=int(font_size * 0.5), color="yellow", method="label")
+    support_clip = support_clip.set_position(("right", y_header)).set_duration(total_duration)
     clips.append(support_clip)
 
-    num_clip = TextClip(str(s["id"]), font=str(FONT_PATH),
-                        fontsize=int(fs*0.6), color="white", method="label")
-    num_clip = num_clip.set_position((VIDEO_SIZE[0] - num_clip.w - RIGHT_MARGIN_PX,
-                                      TOP_MARGIN_PX + support_clip.h + int(fs*0.15)))
-    num_clip = num_clip.set_duration(total)
+    # ✅ Correct sentence number
+    sentence_number = str(sentence["id"])
+    num_clip = TextClip(sentence_number, font=str(FONT_PATH),
+                        fontsize=int(font_size * 0.6), color="white", method="label")
+    num_clip = num_clip.set_position(
+        (VIDEO_RESOLUTION[0] - num_clip.w - MARGIN_RIGHT,
+         y_header + support_clip.h + int(font_size * 0.15))
+    ).set_duration(total_duration)
     clips.append(num_clip)
 
-    first_y = TOP_MARGIN_PX + max(num_clip.h, support_clip.h) + int(fs * BANNER_GAP_RATIO)
+    # --- Captions ---
+    y_text = y_header + int(font_size * HEADER_GAP_RATIO) + 80
+    if mode == "lecture":
+        y_text = add_text(sentence["source"], "white", 0, total_duration, y_text)
+        y_text = add_text(sentence["english"], "yellow", 0, total_duration, y_text)
+        _ = add_text(sentence["french"], "white", 0, total_duration, y_text)
+    else:  # homework mode
+        intro_msg = INTRO_MESSAGES.get(paths["language"], DEFAULT_INTRO)
 
-    # Captions
-    if mode_l == "lecture":
-        y = first_y
-        y = add_cap(clips, s["source"],  0, total, y, "white",  fs)
-        y = add_cap(clips, s["english"], 0, total, y, "yellow", fs)
-        _ = add_cap(clips, s["french"],  0, total, y, "white",  fs)
-    else:
-        # Intro + staged captions
-        d   = nufi.duration
-        t2  = d + PAUSE_BTWN_REPEAT
-        t3  = t2 + d + PAUSE_BTWN_REPEAT
+        # 1. First Nufi playback → intro only
+        y_text = add_text(intro_msg, "white", 0, nufi_2_start, y_text)
+        y_text = add_text("Listen, repeat and translate", "yellow", 0, nufi_2_start, y_text)
 
-        y = first_y
-        y = add_cap(clips, INTRO_LINES.get(p["language"], DEFAULT_INTRO),
-                     0, t2, y, "white", int(fs*0.9))
-        y = add_cap(clips, "Listen, repeat and translate", 0, t2, y, "yellow", fs)
+        # 2. Second Nufi playback → only local sentence
+        y_text = add_text(sentence["source"], "white", nufi_2_start, nufi_3_start - nufi_2_start, y_text)
 
-        y = first_y
-        y = add_cap(clips, s["source"],  t2, total - t2, y, "white",  fs)
-        y = add_cap(clips, s["english"], t3, total - t3, y, "yellow", fs)
-        _ = add_cap(clips, s["french"],  t3, total - t3, y, "white",  fs)
+        # 3. Third Nufi playback → local + English + French
+        y_text = add_text(sentence["source"], "white", nufi_3_start, total_duration - nufi_3_start, y_text)
+        y_text = add_text(sentence["english"], "yellow", nufi_3_start, total_duration - nufi_3_start, y_text)
+        _ = add_text(sentence["french"], "white", nufi_3_start, total_duration - nufi_3_start, y_text)
 
-    # Logos
-    for pos in ("left", "right"):
+    # --- Logos ---
+    for side in ["left", "right"]:
         clips.append(ImageClip(str(LOGO_PATH)).resize(height=100)
-                     .set_position((pos, "bottom")).set_duration(total))
+                     .set_position((side, "bottom")).set_duration(total_duration))
 
-    # Render
-    tmp_aac = f"tmp-{uuid4().hex}.m4a"
-    tmp_mp4 = out.with_suffix(".tmp.mp4")
+    # --- Render ---
+    temp_audio_file = f"temp_audio_{uuid4().hex}.m4a"
+    temp_video_file = output_path.with_suffix(".tmp.mp4")
     try:
         CompositeVideoClip(clips).set_audio(audio).write_videofile(
-            str(tmp_mp4), fps=FPS, codec="libx264", audio_codec="aac",
-            temp_audiofile=tmp_aac, remove_temp=True,
-            ffmpeg_params=["-pix_fmt","yuv420p","-profile:v","high",
-                           "-level","4.1","-movflags","+faststart"],
-            preset="ultrafast",
-            threads=FFMPEG_THREADS_PER_JOB,
+            str(temp_video_file), fps=FRAME_RATE, codec="libx264", audio_codec="aac",
+            temp_audiofile=temp_audio_file, remove_temp=True,
+            ffmpeg_params=["-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1", "-movflags", "+faststart"],
+            preset="ultrafast", threads=FFMPEG_THREADS,
         )
-        shutil.move(tmp_mp4, out)
-        print(f"✅ {out.name}")
-    except Exception as e:
-        print(f"❌ id={s['id']} {e}")
-        Path(tmp_mp4).unlink(missing_ok=True)
-        Path(tmp_aac).unlink(missing_ok=True)
+        shutil.move(temp_video_file, output_path)
+        print(f"✅ Rendered: {output_path.name}")
+    except Exception as error:
+        print(f"❌ Error rendering sentence {sentence['id']}: {error}")
+        Path(temp_audio_file).unlink(missing_ok=True)
+        Path(temp_video_file).unlink(missing_ok=True)
 
-# ── THREAD WORKER ────────────────────────────────────────────────────────
-sem = threading.Semaphore(PYTHON_JOBS)
+# ── MULTI-THREAD RENDERING ──────────────────────────────────────────────
+# chapter_ranges = chapters
+# sentences = tagged_sentences
+# paths = config
+# mode = MODE 
 
-# sents = range_sents
-# row = sents[3]
-def render_slice(sents: List[Dict], st: int, ed: int, p: Dict, mode: str):
-    with sem:
-        for row in sents:
-            if st <= row["id"] <= ed:
-                build_video(row, p, mode,rebuild_video)
+# ── MULTI-THREAD RENDERING ──────────────────────────────────────────────
 
-# ── MAIN PIPELINE ────────────────────────────────────────────────────────
-# lang = LANGUAGE
-# mode = MODE.lower().strip()
-def process_language(lang: str, mode: str):
-    p        = build_paths(lang, mode)
-    raw      = parse_sentences(p["sent_txt"], p["lang_lower"])
-    ranges   = chapter_ranges(raw)
-    bgs      = [ensure_bg(b, VIDEO_SIZE) for b in list_backgrounds(p["bg_dir"])]
-    sentences= tag_bgs(raw, bgs)
+def render_all_sentences(
+    sentences: List[Dict],
+    chapter_ranges: List[tuple],
+    paths: Dict,
+    mode: str,
+    *,
+    start_chapter: int | None = None,
+    end_chapter: int | None = None,
+    start_sentence: int | None = None,
+    end_sentence: int | None = None,
+):
+    """
+    Render sentences into videos by chapter range or by sentence-ID range.
 
-    # # Skip sentences already built
-    # sentences_to_build = [
-    #     s for s in sentences
-    #     if not (p["out_dir"] / f"{p['lang_lower']}_sentence_{s['id']}.mp4").exists()
-    # ]
-    
-    sentences_to_build = sorted(sentences, key=lambda x: x["id"])
-    
-    if not sentences_to_build:
-        print(f"✔ All videos already built for {lang} [{mode}]")
+    Priority:
+      • If start_sentence and end_sentence are provided → render by sentence IDs.
+      • Else → render by chapter ranges.
+
+    NOTE: This function always uses the original sentence["id"] from the text file,
+    so numbers in the video header stay consistent (e.g., 1638, 1639…).
+    """
+    semaphore = threading.Semaphore(MAX_PARALLEL_JOBS)
+
+    def worker(sentence: Dict):
+        with semaphore:
+            create_video_clip(sentence, paths, mode)
+
+    # --- Option A: sentence range ---
+    if start_sentence is not None or end_sentence is not None:
+        if start_sentence is None or end_sentence is None:
+            raise ValueError("Both start_sentence and end_sentence must be provided together.")
+        if start_sentence > end_sentence:
+            raise ValueError(
+                f"Invalid sentence range: start_sentence ({start_sentence}) "
+                f"cannot be greater than end_sentence ({end_sentence})."
+            )
+
+        selected = [s for s in sentences if start_sentence <= s["id"] <= end_sentence]
+        if not selected:
+            print(f"⚠ No sentences found in range {start_sentence}–{end_sentence}. Nothing to render.")
+            return
+
+        print(f"▶ Rendering {len(selected)} sentence(s) in range {start_sentence}–{end_sentence}…")
+        threads = []
+        for sentence in selected:
+            t = threading.Thread(target=worker, args=(sentence,))
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
+        print(f"✔ Finished rendering sentences {start_sentence}–{end_sentence}")
         return
 
-    threads=[]
-    for st, ed in ranges:
-        range_sents = [s for s in sentences_to_build if st <= s["id"] <= ed]
-        if not range_sents:
+    # --- Option B: chapter range ---
+    if start_chapter is None:
+        start_chapter = 1
+    if end_chapter is None:
+        end_chapter = len(chapter_ranges)
+    if start_chapter > end_chapter:
+        raise ValueError(
+            f"Invalid chapter range: start_chapter ({start_chapter}) "
+            f"cannot be greater than end_chapter ({end_chapter})."
+        )
+
+    threads: list[threading.Thread] = []
+    for chapter_index, (start_id, end_id) in enumerate(chapter_ranges, start=1):
+        if chapter_index < start_chapter:
             continue
-        t = threading.Thread(target=render_slice, args=(range_sents, st, ed, p, mode))
-        t.start(); threads.append(t)
+        if chapter_index > end_chapter:
+            break
+
+        segment = [s for s in sentences if start_id <= s["id"] <= end_id]
+        if not segment:
+            print(f"⚠ Chapter {chapter_index} has no sentences in the parsed data; skipping.")
+            continue
+
+        print(f"▶ Processing Chapter {chapter_index} ({start_id}–{end_id}) with {len(segment)} sentence(s)…")
+
+        for sentence in segment:
+            t = threading.Thread(target=worker, args=(sentence,))
+            t.start()
+            threads.append(t)
+
     for t in threads:
         t.join()
-    print(f"✔ Finished {lang} [{mode}]")
 
-# ── ENTRY POINT ──────────────────────────────────────────────────────────
+    print(f"✔ Finished rendering Chapters {start_chapter}–{end_chapter} for {paths['language']} [{mode}]")
+
+# ── ENTRY POINT ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    process_language(LANGUAGE, MODE)
-# ======================================================================================
+    
+    start_chapter=27
+    end_chapter=29
+    
+    start_sentence=1638
+    end_sentence=1638
+    
+   
+    config = get_project_paths(LANGUAGE, MODE)
+    raw_sentences = load_sentences(config["sentence_file"], 
+                                   config["lang_lower"])
+    chapters = get_chapter_ranges(raw_sentences)
+    backgrounds = [resize_background(p) for ext in ("*.png", "*.jpg", "*.jpeg") for p in config["background_dir"].glob(ext)]
+    tagged_sentences = assign_backgrounds(raw_sentences, backgrounds)
+    
+    render_all_sentences(tagged_sentences, 
+                         chapters, 
+                         config, 
+                         MODE,
+                         start_chapter=start_chapter,
+                         end_chapter=end_chapter
+                         )
+    # render_all_sentences(tagged_sentences, 
+    #                      chapters, 
+    #                      config, 
+    #                      MODE, 
+    #                      start_sentence= start_sentence, 
+    #                      end_sentence=end_sentence)
+
+
