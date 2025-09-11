@@ -42,6 +42,7 @@ MARGIN_RIGHT = 25
 MARGIN_TOP = 15
 
 PROJECT_MODE = "Test"  # or "Production"
+PROJECT_MODE = "Production"  # or "Production"
 
 INTRO_MESSAGES = {
     "Nufi": "Yū' Mfʉ́ɑ́'sí, Mfāhngə́ə́:",
