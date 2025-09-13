@@ -1,0 +1,63 @@
+2025-09-13 01:58:10,149 [INFO] ▶️ Starting Step 3 (Gather Files)...
+2025-09-13 01:58:10,155 [INFO] ⏱️ Step 3 (Gather Files) completed in 0.00 seconds
+2025-09-13 01:58:10,157 [INFO] ▶️ Starting Step 4 (Apply Filter)...
+2025-09-13 01:58:10,158 [INFO] ⏱️ Step 4 (Apply Filter) completed in 0.00 seconds
+2025-09-13 01:58:10,161 [INFO] ▶️ Starting Step 5 (Copy + Rename)...
+2025-09-13 01:58:10,234 [INFO] ⏱️ Step 5 (Copy + Rename) completed in 0.07 seconds
+2025-09-13 01:58:10,236 [INFO] ▶️ Starting Step 6 (Normalize 22 files)...
+2025-09-13 01:58:34,222 [INFO] Step (Normalize): 22 processed, 0 skipped, 0 failed
+2025-09-13 01:58:34,226 [INFO] ⏱️ Step 6 (Normalize 22 files) completed in 23.99 seconds
+2025-09-13 01:58:34,241 [INFO] ▶️ Starting Step 7 (Pad 22 files)...
+2025-09-13 01:59:26,751 [INFO] Step (Pad files): 22 processed, 0 skipped, 0 failed
+2025-09-13 01:59:26,753 [INFO] ⏱️ Step 7 (Pad 22 files) completed in 52.51 seconds
+2025-09-13 01:59:26,754 [INFO] ▶️ Starting Step 8 (Merge bilingual, 22 IDs)...
+2025-09-13 01:59:26,758 [INFO] ▶️ Merging bilingual audio for 22 files...
+2025-09-13 01:59:27,111 [INFO] [1/22] ✅ Created no_english_duala_phrasebook_1_padded.mp3
+2025-09-13 01:59:27,399 [INFO] [2/22] ✅ Created no_english_duala_phrasebook_2_padded.mp3
+2025-09-13 01:59:28,481 [INFO] [3/22] ✅ Created no_english_duala_phrasebook_3_padded.mp3
+2025-09-13 01:59:29,371 [INFO] [4/22] ✅ Created no_english_duala_phrasebook_5_padded.mp3
+2025-09-13 01:59:30,257 [INFO] [5/22] ✅ Created no_english_duala_phrasebook_6_padded.mp3
+2025-09-13 01:59:31,182 [INFO] [6/22] ✅ Created no_english_duala_phrasebook_7_padded.mp3
+2025-09-13 01:59:32,275 [INFO] [7/22] ✅ Created no_english_duala_phrasebook_8_padded.mp3
+2025-09-13 01:59:33,003 [INFO] [8/22] ✅ Created no_english_duala_phrasebook_9_padded.mp3
+2025-09-13 01:59:33,973 [INFO] [9/22] ✅ Created no_english_duala_phrasebook_10_padded.mp3
+2025-09-13 01:59:34,922 [INFO] [10/22] ✅ Created no_english_duala_phrasebook_704_padded.mp3
+2025-09-13 01:59:35,791 [INFO] [11/22] ✅ Created no_english_duala_phrasebook_706_padded.mp3
+2025-09-13 01:59:36,823 [INFO] [12/22] ✅ Created no_english_duala_phrasebook_707_padded.mp3
+2025-09-13 01:59:37,668 [INFO] [13/22] ✅ Created no_english_duala_phrasebook_708_padded.mp3
+2025-09-13 01:59:38,102 [INFO] [14/22] ✅ Created no_english_duala_phrasebook_709_padded.mp3
+2025-09-13 01:59:38,570 [INFO] [15/22] ✅ Created no_english_duala_phrasebook_710_padded.mp3
+2025-09-13 01:59:39,241 [INFO] [16/22] ✅ Created no_english_duala_phrasebook_711_padded.mp3
+2025-09-13 01:59:40,104 [INFO] [17/22] ✅ Created no_english_duala_phrasebook_712_padded.mp3
+2025-09-13 01:59:40,879 [INFO] [18/22] ✅ Created no_english_duala_phrasebook_713_padded.mp3
+2025-09-13 01:59:41,752 [INFO] [19/22] ✅ Created no_english_duala_phrasebook_1196_padded.mp3
+2025-09-13 01:59:43,370 [INFO] [20/22] ✅ Created no_english_duala_phrasebook_1198_padded.mp3
+2025-09-13 01:59:43,968 [INFO] [21/22] ✅ Created no_english_duala_phrasebook_1199_padded.mp3
+2025-09-13 01:59:44,411 [INFO] [22/22] ✅ Created no_english_duala_phrasebook_1200_padded.mp3
+2025-09-13 01:59:44,412 [INFO] Step (Merge bilingual): 22 processed, 0 skipped, 0 failed
+2025-09-13 01:59:44,413 [INFO] ⏱️ Step 8 (Merge bilingual, 22 IDs) completed in 17.66 seconds
+2025-09-13 02:00:12,311 [INFO] Script completed in 122.17 seconds.
+2025-09-13 02:27:33,286 [INFO] ▶️ Starting Project Path Setup...
+2025-09-13 02:27:33,289 [INFO] ⏱ Finished Project Path Setup in 0.00 sec
+2025-09-13 02:27:33,290 [INFO] ▶️ Starting Load Sentences...
+2025-09-13 02:27:33,296 [INFO] ⏱ Finished Load Sentences in 0.01 sec
+2025-09-13 02:27:33,298 [INFO] ▶️ Starting Detect Chapters...
+2025-09-13 02:27:33,300 [INFO] ⏱ Finished Detect Chapters in 0.00 sec
+2025-09-13 02:27:33,302 [INFO] ▶️ Starting Prepare Backgrounds...
+2025-09-13 02:27:33,464 [INFO] ⏱ Finished Prepare Backgrounds in 0.16 sec
+2025-09-13 02:27:33,465 [INFO] ▶️ Starting Assign Backgrounds...
+2025-09-13 02:27:33,468 [INFO] ⏱ Finished Assign Backgrounds in 0.00 sec
+2025-09-13 02:27:33,469 [INFO] ▶️ Starting Render Sentences...
+2025-09-13 02:27:33,531 [INFO] ⏱ Finished Render Sentences in 0.06 sec
+2025-09-13 02:38:08,235 [INFO] ▶️ Starting Project Path Setup...
+2025-09-13 02:38:08,239 [INFO] ⏱ Finished Project Path Setup in 0.00 sec
+2025-09-13 02:38:08,242 [INFO] ▶️ Starting Load Sentences...
+2025-09-13 02:38:08,248 [INFO] ⏱ Finished Load Sentences in 0.01 sec
+2025-09-13 02:38:08,250 [INFO] ▶️ Starting Detect Chapters...
+2025-09-13 02:38:08,252 [INFO] ⏱ Finished Detect Chapters in 0.00 sec
+2025-09-13 02:38:08,256 [INFO] ▶️ Starting Prepare Backgrounds...
+2025-09-13 02:38:08,267 [INFO] ⏱ Finished Prepare Backgrounds in 0.01 sec
+2025-09-13 02:38:08,269 [INFO] ▶️ Starting Assign Backgrounds...
+2025-09-13 02:38:08,271 [INFO] ⏱ Finished Assign Backgrounds in 0.00 sec
+2025-09-13 02:38:08,276 [INFO] ▶️ Starting Render Sentences...
+2025-09-13 02:38:10,567 [INFO] ⏱ Finished Render Sentences in 2.29 sec

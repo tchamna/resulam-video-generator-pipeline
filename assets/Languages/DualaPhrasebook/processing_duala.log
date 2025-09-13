@@ -1,0 +1,110 @@
+2025-09-13 03:13:36,533 [INFO] ▶️ Starting Step 3 (Gather Files)...
+2025-09-13 03:13:36,537 [INFO] ⏱️ Step 3 (Gather Files) completed in 0.00 seconds
+2025-09-13 03:13:36,538 [INFO] ▶️ Starting Step 4 (Apply Filter)...
+2025-09-13 03:13:36,540 [INFO] ⏱️ Step 4 (Apply Filter) completed in 0.00 seconds
+2025-09-13 03:13:36,540 [INFO] ▶️ Starting Step 5 (Copy + Rename)...
+2025-09-13 03:13:36,548 [INFO] ⏱️ Step 5 (Copy + Rename) completed in 0.01 seconds
+2025-09-13 03:30:41,921 [INFO] ▶️ Starting Step 3 (Gather Files)...
+2025-09-13 03:30:41,923 [INFO] ⏱️ Step 3 (Gather Files) completed in 0.00 seconds
+2025-09-13 03:30:41,924 [INFO] ▶️ Starting Step 4 (Apply Filter)...
+2025-09-13 03:30:41,933 [INFO] ⏱️ Step 4 (Apply Filter) completed in 0.00 seconds
+2025-09-13 03:30:41,933 [INFO] ▶️ Starting Step 5 (Copy + Rename)...
+2025-09-13 03:30:41,940 [INFO] ⏱️ Step 5 (Copy + Rename) completed in 0.01 seconds
+2025-09-13 03:30:41,941 [INFO] ▶️ Starting Step 6 (Normalize 22 files)...
+2025-09-13 03:31:20,137 [INFO] Step (Normalize): 22 processed, 0 skipped, 0 failed
+2025-09-13 03:31:20,137 [INFO] ⏱️ Step 6 (Normalize 22 files) completed in 38.20 seconds
+2025-09-13 03:31:20,137 [INFO] ▶️ Starting Step 7 (Pad 22 files)...
+2025-09-13 03:32:51,714 [INFO] Step (Pad files): 22 processed, 0 skipped, 0 failed
+2025-09-13 03:32:51,715 [INFO] ⏱️ Step 7 (Pad 22 files) completed in 91.58 seconds
+2025-09-13 03:32:51,715 [INFO] ▶️ Starting Step 8 (Merge bilingual, 22 IDs)...
+2025-09-13 03:32:51,718 [INFO] ▶️ Merging bilingual audio for 22 files...
+2025-09-13 03:32:52,391 [INFO] [1/22] ✅ Created english_duala_phrasebook_1_padded.mp3
+2025-09-13 03:32:52,720 [INFO] [2/22] ✅ Created no_english_duala_phrasebook_2_padded.mp3
+2025-09-13 03:32:53,538 [INFO] [3/22] ✅ Created english_duala_phrasebook_3_padded.mp3
+2025-09-13 03:32:54,136 [INFO] [4/22] ✅ Created english_duala_phrasebook_5_padded.mp3
+2025-09-13 03:32:54,778 [INFO] [5/22] ✅ Created english_duala_phrasebook_6_padded.mp3
+2025-09-13 03:32:55,529 [INFO] [6/22] ✅ Created english_duala_phrasebook_7_padded.mp3
+2025-09-13 03:32:56,270 [INFO] [7/22] ✅ Created english_duala_phrasebook_8_padded.mp3
+2025-09-13 03:32:56,993 [INFO] [8/22] ✅ Created english_duala_phrasebook_9_padded.mp3
+2025-09-13 03:32:57,755 [INFO] [9/22] ✅ Created english_duala_phrasebook_10_padded.mp3
+2025-09-13 03:32:58,195 [INFO] [10/22] ✅ Created no_english_duala_phrasebook_704_padded.mp3
+2025-09-13 03:32:58,670 [INFO] [11/22] ✅ Created no_english_duala_phrasebook_706_padded.mp3
+2025-09-13 03:32:59,261 [INFO] [12/22] ✅ Created no_english_duala_phrasebook_707_padded.mp3
+2025-09-13 03:32:59,734 [INFO] [13/22] ✅ Created no_english_duala_phrasebook_708_padded.mp3
+2025-09-13 03:33:00,180 [INFO] [14/22] ✅ Created no_english_duala_phrasebook_709_padded.mp3
+2025-09-13 03:33:00,803 [INFO] [15/22] ✅ Created no_english_duala_phrasebook_710_padded.mp3
+2025-09-13 03:33:01,319 [INFO] [16/22] ✅ Created no_english_duala_phrasebook_711_padded.mp3
+2025-09-13 03:33:01,850 [INFO] [17/22] ✅ Created no_english_duala_phrasebook_712_padded.mp3
+2025-09-13 03:33:02,261 [INFO] [18/22] ✅ Created no_english_duala_phrasebook_713_padded.mp3
+2025-09-13 03:33:02,988 [INFO] [19/22] ✅ Created english_duala_phrasebook_1196_padded.mp3
+2025-09-13 03:33:04,300 [INFO] [20/22] ✅ Created english_duala_phrasebook_1198_padded.mp3
+2025-09-13 03:33:28,484 [INFO] [21/22] ✅ Created english_duala_phrasebook_1199_padded.mp3
+2025-09-13 03:33:33,317 [INFO] ▶️ Starting Step 3 (Gather Files)...
+2025-09-13 03:33:33,321 [INFO] ⏱️ Step 3 (Gather Files) completed in 0.00 seconds
+2025-09-13 03:33:33,321 [INFO] ▶️ Starting Step 4 (Apply Filter)...
+2025-09-13 03:33:33,322 [INFO] ⏱️ Step 4 (Apply Filter) completed in 0.00 seconds
+2025-09-13 03:33:33,323 [INFO] ▶️ Starting Step 5 (Copy + Rename)...
+2025-09-13 03:33:33,330 [INFO] ⏱️ Step 5 (Copy + Rename) completed in 0.01 seconds
+2025-09-13 03:33:33,332 [INFO] ▶️ Starting Step 6 (Normalize 22 files)...
+2025-09-13 03:33:33,333 [INFO] Step (Normalize): 0 processed, 22 skipped, 0 failed
+2025-09-13 03:33:33,334 [INFO] ⏱️ Step 6 (Normalize 22 files) completed in 0.00 seconds
+2025-09-13 03:33:33,336 [INFO] ▶️ Starting Step 7 (Pad 22 files)...
+2025-09-13 03:33:33,338 [INFO] Step (Pad files): 0 processed, 22 skipped, 0 failed
+2025-09-13 03:33:33,339 [INFO] ⏱️ Step 7 (Pad 22 files) completed in 0.00 seconds
+2025-09-13 03:33:33,340 [INFO] ▶️ Starting Step 8 (Merge bilingual, 22 IDs)...
+2025-09-13 03:33:33,345 [INFO] ▶️ Merging bilingual audio for 22 files...
+2025-09-13 03:33:34,086 [INFO] [22/22] ✅ Created english_duala_phrasebook_1200_padded.mp3
+2025-09-13 03:33:34,087 [INFO] Step (Merge bilingual): 1 processed, 21 skipped, 0 failed
+2025-09-13 03:33:34,089 [INFO] ⏱️ Step 8 (Merge bilingual, 22 IDs) completed in 0.75 seconds
+2025-09-13 03:35:06,843 [INFO] Script completed in 93.53 seconds.
+2025-09-13 03:44:12,376 [INFO] ▶️ Starting Step 3 (Gather Files)...
+2025-09-13 03:44:12,384 [INFO] ⏱️ Step 3 (Gather Files) completed in 0.01 seconds
+2025-09-13 03:44:12,385 [INFO] ▶️ Starting Step 4 (Apply Filter)...
+2025-09-13 03:44:12,385 [INFO] ⏱️ Step 4 (Apply Filter) completed in 0.00 seconds
+2025-09-13 03:44:12,385 [INFO] ▶️ Starting Step 5 (Copy + Rename)...
+2025-09-13 03:44:12,401 [INFO] ⏱️ Step 5 (Copy + Rename) completed in 0.01 seconds
+2025-09-13 03:44:56,603 [INFO] ▶️ Starting Step 3 (Gather Files)...
+2025-09-13 03:44:56,605 [INFO] ⏱️ Step 3 (Gather Files) completed in 0.00 seconds
+2025-09-13 03:44:56,606 [INFO] ▶️ Starting Step 4 (Apply Filter)...
+2025-09-13 03:44:56,607 [INFO] ⏱️ Step 4 (Apply Filter) completed in 0.00 seconds
+2025-09-13 03:44:56,608 [INFO] ▶️ Starting Step 5 (Copy + Rename)...
+2025-09-13 03:44:56,613 [INFO] ⏱️ Step 5 (Copy + Rename) completed in 0.00 seconds
+2025-09-13 03:47:03,241 [INFO] ▶️ Starting Step 3 (Gather Files)...
+2025-09-13 03:47:03,244 [INFO] ⏱️ Step 3 (Gather Files) completed in 0.00 seconds
+2025-09-13 03:47:03,244 [INFO] ▶️ Starting Step 4 (Apply Filter)...
+2025-09-13 03:47:03,245 [INFO] ⏱️ Step 4 (Apply Filter) completed in 0.00 seconds
+2025-09-13 03:47:03,245 [INFO] ▶️ Starting Step 5 (Copy + Rename)...
+2025-09-13 03:47:03,255 [INFO] ⏱️ Step 5 (Copy + Rename) completed in 0.01 seconds
+2025-09-13 03:47:03,257 [INFO] ▶️ Starting Step 6 (Normalize 22 files)...
+2025-09-13 03:47:19,052 [INFO] Step (Normalize): 22 processed, 0 skipped, 0 failed
+2025-09-13 03:47:19,053 [INFO] ⏱️ Step 6 (Normalize 22 files) completed in 15.80 seconds
+2025-09-13 03:47:19,054 [INFO] ▶️ Starting Step 7 (Pad 22 files)...
+2025-09-13 03:49:10,951 [INFO] Step (Pad files): 22 processed, 0 skipped, 0 failed
+2025-09-13 03:49:10,951 [INFO] ⏱️ Step 7 (Pad 22 files) completed in 111.90 seconds
+2025-09-13 03:49:10,952 [INFO] ▶️ Starting Step 8 (Merge bilingual, 22 IDs)...
+2025-09-13 03:49:10,954 [INFO] ▶️ Merging bilingual audio for 22 files...
+2025-09-13 03:49:11,583 [INFO] [1/22] ✅ Created english_duala_phrasebook_1_padded.mp3
+2025-09-13 03:49:11,948 [INFO] [2/22] ✅ Created no_english_duala_phrasebook_2_padded.mp3
+2025-09-13 03:49:12,726 [INFO] [3/22] ✅ Created english_duala_phrasebook_3_padded.mp3
+2025-09-13 03:49:13,333 [INFO] [4/22] ✅ Created english_duala_phrasebook_5_padded.mp3
+2025-09-13 03:49:14,000 [INFO] [5/22] ✅ Created english_duala_phrasebook_6_padded.mp3
+2025-09-13 03:49:14,725 [INFO] [6/22] ✅ Created english_duala_phrasebook_7_padded.mp3
+2025-09-13 03:49:15,398 [INFO] [7/22] ✅ Created english_duala_phrasebook_8_padded.mp3
+2025-09-13 03:49:16,049 [INFO] [8/22] ✅ Created english_duala_phrasebook_9_padded.mp3
+2025-09-13 03:49:16,672 [INFO] [9/22] ✅ Created english_duala_phrasebook_10_padded.mp3
+2025-09-13 03:49:17,088 [INFO] [10/22] ✅ Created no_english_duala_phrasebook_704_padded.mp3
+2025-09-13 03:49:17,489 [INFO] [11/22] ✅ Created no_english_duala_phrasebook_706_padded.mp3
+2025-09-13 03:49:18,033 [INFO] [12/22] ✅ Created no_english_duala_phrasebook_707_padded.mp3
+2025-09-13 03:49:18,493 [INFO] [13/22] ✅ Created no_english_duala_phrasebook_708_padded.mp3
+2025-09-13 03:49:18,952 [INFO] [14/22] ✅ Created no_english_duala_phrasebook_709_padded.mp3
+2025-09-13 03:49:19,511 [INFO] [15/22] ✅ Created no_english_duala_phrasebook_710_padded.mp3
+2025-09-13 03:49:19,981 [INFO] [16/22] ✅ Created no_english_duala_phrasebook_711_padded.mp3
+2025-09-13 03:49:20,486 [INFO] [17/22] ✅ Created no_english_duala_phrasebook_712_padded.mp3
+2025-09-13 03:49:20,849 [INFO] [18/22] ✅ Created no_english_duala_phrasebook_713_padded.mp3
+2025-09-13 03:49:21,499 [INFO] [19/22] ✅ Created english_duala_phrasebook_1196_padded.mp3
+2025-09-13 03:49:22,630 [INFO] [20/22] ✅ Created english_duala_phrasebook_1198_padded.mp3
+2025-09-13 03:49:23,703 [INFO] [21/22] ✅ Created english_duala_phrasebook_1199_padded.mp3
+2025-09-13 03:49:45,279 [INFO] [22/22] ✅ Created english_duala_phrasebook_1200_padded.mp3
+2025-09-13 03:49:45,279 [INFO] Step (Merge bilingual): 22 processed, 0 skipped, 0 failed
+2025-09-13 03:49:45,280 [INFO] ⏱️ Step 8 (Merge bilingual, 22 IDs) completed in 34.33 seconds
+2025-09-13 03:50:30,645 [INFO] Script completed in 207.40 seconds.
