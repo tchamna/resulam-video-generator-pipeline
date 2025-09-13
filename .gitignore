@@ -17,6 +17,7 @@ dist/
 build/
 test_moviepy.py
 *Results_Audios/
+*Results_Videos/
 
 
 # --- Jupyter & IPython --------------------------------------------
@@ -33,6 +34,7 @@ tmp-*.m4a          # temp audio created by MoviePy
 *.sqlite
 *.db
 *MPY_wvf_snd*
+
 
 # --- Project-specific large outputs --------------------------------
 Python_Scripts_Resulam_Phrasebooks_Audio_Processing/
