@@ -50,5 +50,11 @@ other_helpers/
 Assets/Results_Audios/
 Assets/Results_Videos/
 
+# Ignore results outputs
+
+**/Results_Audios/
+**/Results_Videos/
+
+
 # Allow everything else inside Assets
 !Assets/**
