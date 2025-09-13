@@ -12,9 +12,11 @@ __pycache__/
 .venv/
 venv/
 venv_v1/
+venv_video/
 dist/
 build/
 test_moviepy.py
+*Results_Audios/
 
 
 # --- Jupyter & IPython --------------------------------------------
@@ -30,6 +32,7 @@ tmp-*.m4a          # temp audio created by MoviePy
 *.csv
 *.sqlite
 *.db
+*MPY_wvf_snd*
 
 # --- Project-specific large outputs --------------------------------
 Python_Scripts_Resulam_Phrasebooks_Audio_Processing/
