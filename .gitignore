@@ -16,9 +16,6 @@ venv_video/
 dist/
 build/
 test_moviepy.py
-*Results_Audios/
-*Results_Videos/
-
 
 # --- Jupyter & IPython --------------------------------------------
 .ipynb_checkpoints/
@@ -35,8 +32,7 @@ tmp-*.m4a          # temp audio created by MoviePy
 *.db
 *MPY_wvf_snd*
 
-
-# --- Project-specific large outputs --------------------------------
+# --- Project-specific large outputs -------------------------------
 Python_Scripts_Resulam_Phrasebooks_Audio_Processing/
 Languages/*Phrasebook/*Only/
 Backgrounds_Selected/
@@ -48,3 +44,11 @@ Backgrounds_Selected/
 # *.jpg
 # *.jpeg
 other_helpers/ 
+
+# --- Assets rules -------------------------------------------------
+# Ignore these two specific subdirectories
+Assets/Results_Audios/
+Assets/Results_Videos/
+
+# Allow everything else inside Assets
+!Assets/**
