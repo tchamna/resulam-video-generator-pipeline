@@ -43,6 +43,7 @@ Backgrounds_Selected/
 # *.png
 # *.jpg
 # *.jpeg
+*.docx
 other_helpers/ 
 
 # --- Assets rules -------------------------------------------------
