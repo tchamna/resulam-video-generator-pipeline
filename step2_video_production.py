@@ -94,32 +94,6 @@ def log_time(step_name: str):
 
 
 
-# def get_project_paths(language: str, mode: str) -> Dict[str, Path | str]:
-#     local_language_title = language.title()
-#     language_lower = language.lower()
-#     mode_folder = "Lecture" if mode.lower() == "lecture" else "Homework"
-
-#     output_dir = BASE_DIR /"Assets" / f"Languages/{local_language_title}Phrasebook/Results" / f"{mode_folder}"
-     
-#     output_dir.mkdir(parents=True, exist_ok=True)
-
-#     background_dir = BASE_DIR/ "Assets" / "Backgrounds_Selected" / local_language_title
-#     if not background_dir.exists():
-#         background_dir = BASE_DIR / "Assets"/ "Backgrounds_Selected" / "Default"
-    
-#     if PROJECT_MODE == "Test":
-#         local_audio_dir = BASE_DIR/ "Assets" / f"Languages/{local_language_title}Phrasebook/{local_language_title}Only{PROJECT_MODE}" / "gen2_normalized_padded"
-#     else:  # Production mode
-#         local_audio_dir = BASE_DIR/ "Assets" / f"Languages/{local_language_title}Phrasebook/{local_language_title}Only" / "gen2_normalized_padded"
-#     return {
-#         "language": local_language_title,
-#         "lang_lower": language_lower,
-#         "background_dir": background_dir,
-#         "local_audio_dir": local_audio_dir,
-#         "english_audio_dir": BASE_DIR / "EnglishOnly",
-#         "output_dir": output_dir,
-#         "sentence_file": BASE_DIR/ "Assets" / f"Languages/{local_language_title}Phrasebook/{language_lower}_english_french_phrasebook_sentences_list.txt",
-#     }
 
 def get_project_paths(language: str, mode: str):
     
@@ -137,7 +111,6 @@ def get_project_paths(language: str, mode: str):
     background_dir = assets_dir / "Backgrounds_Selected" / local_language_title
     if not background_dir.exists():
         background_dir = background_dir.parent / "Default"
-
     # Local audio: depends on PROJECT_MODE
     suffix = "OnlyTest" if PROJECT_MODE.lower() == "test" else "Only"
     # local_audio_dir = assets_dir / "Languages" / f"{local_language_title}Phrasebook" / f"{local_language_title}{suffix}" / "gen2_normalized_padded"

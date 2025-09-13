@@ -31,7 +31,12 @@ from moviepy.editor import VideoFileClip, concatenate_videoclips
 # ── USER SETTINGS ──────────────────────────────────────────────────────
 LANGUAGE  = "Duala"         # Language
 MODE      = "lecture"       # "lecture" or "homework"
-ROOT      = Path(r"G:/My Drive/Data_Science/Resulam/Phrasebook_Audio_Video_Processing_production")
+# BASE_DIR      = Path(r"G:/My Drive/Data_Science/Resulam/Phrasebook_Audio_Video_Processing_production")
+
+BASE_DIR = Path(os.getcwd())
+
+
+
 FPS       = 24
 FFMPEG_THREADS_PER_JOB = 4
 SHUFFLE_SEED = None
@@ -50,16 +55,22 @@ EXCLUDED_SENTENCES = {
 }
 
 # ── FOLDER LAYOUT ──────────────────────────────────────────────────────
-VIDEO_DIR  = ROOT / "Python_Scripts_Resulam_Phrasebooks_Audio_Processing"
+VIDEO_DIR  = BASE_DIR / "Python_Scripts_Resulam_Phrasebooks_Audio_Processing"
+
+assets_dir = BASE_DIR / "Assets"
+
+# Output directory (always created)
+VIDEO_DIR = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook" / "Results_Videos" / mode_folder
+
 VIDEO_PATTERN = "{lang_lower}_sentence_{id}.mp4"
-OUTPUT_DIR = ROOT /"Languages"/f"{LANGUAGE.title()}Phrasebook"/ f"{LANGUAGE.title()}_Chapters_Combined"
+OUTPUT_DIR = BASE_DIR /"Languages"/f"{LANGUAGE.title()}Phrasebook"/ f"{LANGUAGE.title()}_Chapters_Combined"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ── HELPERS ────────────────────────────────────────────────────────────
 def build_paths(lang: str, mode: str) -> Dict[str, Path]:
     lang_lower = lang.lower()
     out_dir = VIDEO_DIR / f"{lang.title()}/{mode.title()}"
-    txt = ROOT / f"Languages/{lang}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt"
+    txt = BASE_DIR / f"Languages/{lang}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt"
     if not out_dir.exists():
         raise FileNotFoundError(f"Sentence-video folder not found: {out_dir}")
     if not txt.exists():
