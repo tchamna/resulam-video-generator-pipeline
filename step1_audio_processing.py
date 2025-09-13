@@ -1,16 +1,29 @@
+
 import os
 import shutil
 from natsort import natsorted
 from pathlib import Path
-from pydub import AudioSegment, silence
+
 import glob
 import json, subprocess
-import numpy as np, soundfile as sf
+import numpy as np
 import pyloudnorm as pyln
 import re
 
 from pydub.silence import detect_nonsilent
+from pydub import AudioSegment, silence
 
+import librosa
+import soundfile as sf
+import noisereduce as nr
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+import logging
+import time
+
+# ─── Timer Start ───────────────────────────────────────────────
+start_time = time.perf_counter()
 
 # ─── Configuration ─────────────────────────────────────────────────────
 BASE_DIR = Path(r"G:\My Drive\Data_Science\Resulam\Phrasebook_Audio_Video_Processing_production")
@@ -22,6 +35,8 @@ repeat_local_audio = 1
 flag_pad = True
 local_language_title = local_language.title()
 test_or_production = "test"
+test_or_production = "production"
+
 
 # ─── Filtering Configuration ──────────────────────────────────────────────
 # Set USE_FILTERING to False to process all files as before.
@@ -30,14 +45,17 @@ USE_FILTERING = True
 # Option 1: Filter by a range of sentence numbers.
 # If both sentence and chapter ranges are set, 
 # the sentence range will be used.
-FILTER_SENTENCE_START = 1619
-FILTER_SENTENCE_END   = 1620
+FILTER_SENTENCE_START = 1622
+FILTER_SENTENCE_END   = 1624
+
 FILTER_SENTENCE_START = None
 FILTER_SENTENCE_END   = None
 
 # Option 2: Filter by a range of chapter numbers.
-FILTER_CHAPTER_START = 1
-FILTER_CHAPTER_END   = 3
+# FILTER_CHAPTER_START = 1
+# FILTER_CHAPTER_END   = 3
+FILTER_CHAPTER_START = None
+FILTER_CHAPTER_END   = None 
 
 # Global Silent Segments
 trailing_silence = AudioSegment.silent(duration=2000)
@@ -64,13 +82,24 @@ def get_nth_parent_directory(path: Path, n: int) -> Path:
         path = path.parent
     return path
 
-script_dir = BASE_DIR
-phrasebook_dir_name = f"{local_language_title}Only" if test_or_production == "production" else f"{local_language_title}OnlyTest"
-local_language_dir = (script_dir / "Languages" / f"{local_language_title}Phrasebook" / phrasebook_dir_name).resolve()
+local_lang_audio_dir_name = f"{local_language_title}Only" if test_or_production == "production" else f"{local_language_title}OnlyTest"
+local_language_dir = (BASE_DIR / "Languages" / f"{local_language_title}Phrasebook" / local_lang_audio_dir_name).resolve()
 local_audio_path = local_language_dir
-main_dir = script_dir
-eng_audio_path = main_dir / "EnglishOnly"
+eng_audio_path = BASE_DIR / "EnglishOnly"
 print("Starting audio directory setup...")
+
+
+# ─── Setup Logging ─────────────────────────────────────────────
+log_file = BASE_DIR / "processing.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(log_file, encoding="utf-8"),
+        logging.StreamHandler()  # also print to console
+    ]
+)
 
 # ─── Subdirectory Check ─────────────────────────────────────────────────
 def check_subdirectories(directory: Path) -> list:
@@ -230,12 +259,12 @@ def export_padded_audios(files_to_process: list, out_dir: Path):
             else:
                 final, _ = pad_and_join_chunks(seg, apply_padding=bool(flag_pad))
 
-            dst = out_dir / f"{src_path.stem}_padded.mp3"
-            if dst.exists():
-                print(f"⏩ Skipped padding {dst.name} (already exists)")
+            outpout_path = out_dir / f"{src_path.stem}_padded.mp3"
+            if outpout_path.exists():
+                print(f"⏩ Skipped padding {outpout_path.name} (already exists)")
                 continue
-            final.export(dst, bitrate="192k", format="mp3")
-            print(f"✅ {name} → {dst.name}")
+            final.export(outpout_path, bitrate="192k", format="mp3")
+            print(f"✅ {name} → {outpout_path.name}")
         except Exception as e:
             print(f"Error processing {src_path.name}: {e}")
             bad.append(src_path.name)
@@ -471,7 +500,7 @@ def detect_silences(path: str,
     return silences
 
 # ─── Batch Processing (with fixed or adaptive silence) ─────────────────
-def batch_process_mp3s(ref_english: str,
+def batch_process_mp3s(
                        input_folder: str,
                        output_folder: str,
                        *,
@@ -490,27 +519,11 @@ def batch_process_mp3s(ref_english: str,
     - preset: 'light', 'medium', 'aggressive' → controls filter strength.
     """
 
-    def ffprobe_stream(path: str) -> dict:
-        out = subprocess.check_output([
-            "ffprobe","-v","error","-select_streams","a:0",
-            "-show_entries","stream=channels,sample_rate,bit_rate",
-            "-of","json", path
-        ], text=True)
-        streams = json.loads(out).get("streams", [])
-        return streams[0] if streams else {}
-
-    def nearest_mp3_kbps(bit_rate_bps, default=192) -> str:
-        try:
-            kbps = int(round(int(bit_rate_bps)/1000.0))
-            common = [96,112,128,160,192,224,256,320]
-            return f"{min(common, key=lambda c: abs(c-kbps))}k"
-        except Exception:
-            return f"{default}k"
-
-    ref = ffprobe_stream(ref_english)
-    ENG_SR = int(ref.get("sample_rate", 44100))
-    ENG_CH = int(ref.get("channels", 2))
-    ENG_BR = nearest_mp3_kbps(ref.get("bit_rate", None))
+    # Hardcoded target audio characteristics
+    TARGET_SR = 44100       # 44.1 kHz
+    TARGET_CH = 1           # Stereo (use 1 for mono)
+    TARGET_BR = "192k"      # MP3 bitrate
+    
 
     in_dir, out_dir = Path(input_folder), Path(output_folder)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -523,8 +536,8 @@ def batch_process_mp3s(ref_english: str,
     guard = edge_guard_ms / 1000.0
 
     for src in files:
-        dst = out_dir / src.name
-        if dst.exists():
+        outpout_path = out_dir / src.name
+        if outpout_path.exists():
             print(f"⏩ Skipped normalization {src.name} (already exists)")
             continue
 
@@ -542,10 +555,16 @@ def batch_process_mp3s(ref_english: str,
                     safe_silences.append((s2, e2))
 
         # ─── Filter Chain Presets ──────────────────────────────
+        # LUFS = Loudness Units relative to Full Scale.
+        # loudnorm=I=-23 (Quiet) is ITU-R BS.1770-4 standard for broadcast
+        # loudnorm=I=-16 (Normal) is common for podcasts
+        # loudnorm=I=-14 (Loud) is common for music streaming
+        
         if preset == "light":
             af_parts = [
                 "highpass=f=80", "lowpass=f=9000",
                 "dynaudnorm=f=150:g=10:n=1:p=0.7:m=5",
+                "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=summary",
                 "alimiter=limit=-1.5dB:level=true"
             ]
         elif preset == "medium":
@@ -553,7 +572,7 @@ def batch_process_mp3s(ref_english: str,
                 "highpass=f=80", "lowpass=f=9000",
                 "afftdn=nr=6:nt=w:om=o",   # mild denoise
                 "dynaudnorm=f=150:g=10:n=1:p=0.7:m=5",
-                "loudnorm=I=-23:TP=-1.5:LRA=11:print_format=summary",
+                "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=summary",
                 "alimiter=limit=-1.5dB:level=true"
             ]
         elif preset == "aggressive":
@@ -562,7 +581,7 @@ def batch_process_mp3s(ref_english: str,
                 "afftdn=nr=12:nt=w:om=o",  # stronger denoise
                 "acompressor=threshold=-22dB:ratio=3:attack=8:release=120:knee=3:makeup=3",
                 "dynaudnorm=f=150:g=15:n=1:p=0.7:m=7",
-                "loudnorm=I=-23:TP=-1.5:LRA=11:print_format=summary",
+                "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=summary",
                 "alimiter=limit=-1.5dB:level=true"
             ]
         else:
@@ -582,28 +601,77 @@ def batch_process_mp3s(ref_english: str,
             "ffmpeg","-y","-i", str(src),
             "-vn",
             "-af", af_chain,
-            "-ar", str(ENG_SR),
-            "-ac", str(ENG_CH),
-            "-b:a", ENG_BR,
-            str(dst)
+            "-ar", str(TARGET_SR),
+            "-ac", str(TARGET_CH),
+            "-b:a", TARGET_BR,
+            str(outpout_path)
         ]
         try:
             subprocess.run(cmd, check=True, text=True, capture_output=True)
             if apply_silence and safe_silences:
                 spans = ", ".join([f"{t0:.2f}-{t1:.2f}s" for t0, t1 in safe_silences])
-                print(f"✅ {src.name} → {dst.name} (silence processed: {spans}, preset={preset})")
+                print(f"✅ {src.name} → {outpout_path.name} (silence processed: {spans}, preset={preset})")
             else:
-                print(f"✅ {src.name} → {dst.name} (preset={preset}, no silence muting)")
+                print(f"✅ {src.name} → {outpout_path.name} (preset={preset}, no silence muting)")
         except subprocess.CalledProcessError as e:
             print(f"❌ {src.name} failed\n{e.stderr[:300]}")
+
+
+def copy_and_rename(src_file: Path) -> Path | None:
+    """
+    Copy and rename a file into local_audio_path with standardized prefix.
+    Returns the new path if successful, else None.
+    """
+    try:
+        num = get_digits_numbers_from_string(src_file.name)
+        if num is None:
+            return None
+
+        target_name = f"{prefix}{num}.mp3"
+        target_path = local_audio_path / target_name
+
+        if not target_path.exists():
+            shutil.copy(src_file, target_path)
+            print(f"✅ Copied {src_file.name} → {target_name}")
+        else:
+            print(f"⏩ Already exists: {target_name}")
+
+        return target_path
+    except Exception as e:
+        print(f"❌ Error copying {src_file}: {e}")
+        return None
+
+def timed_step(step_name, func, *args, **kwargs):
+    """
+    Helper to log execution time for each step.
+    """
+    logging.info(f"▶️ Starting {step_name}...")
+    start = time.perf_counter()
+    result = func(*args, **kwargs)
+    elapsed = time.perf_counter() - start
+    logging.info(f"⏱️ {step_name} completed in {elapsed:.2f} seconds")
+    return result
+
+
+def is_new_file_better(temp_path, existing_path):
+    from pydub.utils import mediainfo
+    new_dur = float(mediainfo(str(temp_path))["duration"])
+    old_dur = float(mediainfo(str(existing_path))["duration"])
+    return new_dur > old_dur
 
 #####################################################
 # END FUNCTIONS
 #####################################################
 
-# ──────────────── SELECT WORKING SET (NO MASS EXTRACTION) ───────────────
+# ─── Global Timer ─────────────────────────────────────────────
+global_start = time.perf_counter()
+
+# ──────────────── SELECT WORKING SET ───────────────
+prefix = f"{local_language.lower()}_phrasebook_"
+subset_files_now = []
+
 if USE_FILTERING:
-    # 1) Move only raw subdirectories into original_audios
+    # 1) Ensure raw subdirectories are moved into original_audios
     original_dir = local_audio_path / "original_audios"
     os.makedirs(original_dir, exist_ok=True)
 
@@ -616,6 +684,7 @@ if USE_FILTERING:
     }
 
     for item in local_audio_path.iterdir():
+        print(item)
         if item.is_dir() and item.name not in generated_folders:
             try:
                 shutil.move(str(item), original_dir / item.name)
@@ -623,54 +692,58 @@ if USE_FILTERING:
             except Exception as e:
                 print(f"❌ Error moving folder '{item}': {e}")
 
-    # 2) Remove old loose audio files in parent
-    for f in local_audio_path.glob("*.mp3"):
-        f.unlink()
+   
+    # 2) Gather all files recursively inside original_audios
+    # all_audio_files, _ = get_audio(original_dir, check_subfolders=True)
 
-    # 3) Find all files recursively inside original_audios
-    all_audio_files, _ = get_audio(original_dir, check_subfolders=True)
-
-    # 4) Apply filter
-    source_files_to_process = apply_processing_filter(all_audio_files, chapter_ranges)
+    all_audio_files, _ = timed_step(
+        "Step 3 (Gather Files)",
+        get_audio, original_dir, check_subfolders=True
+    )
+    
+    # 3) Apply filter
+    # source_files_to_process = apply_processing_filter(all_audio_files, chapter_ranges)
+    
+    source_files_to_process = timed_step(
+        "Step 4 (Apply Filter)",
+        apply_processing_filter, all_audio_files, chapter_ranges
+    )
+     
     if not source_files_to_process:
         print("❌ No files to process after filtering. Exiting.")
         raise SystemExit
 
-    # 5) Copy + Rename ONLY filtered files back to parent directory
-    prefix = f"{local_language.lower()}_phrasebook_"
-    subset_files_now = []
-    for f in source_files_to_process:
-        num = get_digits_numbers_from_string(Path(f).name)
-        if num is None:
-            continue
-        target_name = f"{prefix}{num}.mp3"
-        target_path = local_audio_path / target_name
+    # 4) Parallel copy + rename back to parent
+    def parallel_copy():
+        subset = []
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(copy_and_rename, Path(f)) for f in source_files_to_process]
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    subset.append(result)
+        return subset
 
-        if not target_path.exists():
-            shutil.copy(f, target_path)
-            print(f"✅ Copied {Path(f).name} → {target_name}")
-        else:
-            print(f"⏩ Already exists: {target_name}")
-
-        subset_files_now.append(target_path)
+    subset_files_now = timed_step("Step 5 (Copy + Rename)", parallel_copy)
 
     working_input_dir = local_audio_path
 
 else:
-    # Legacy: extract everything
+    # Legacy mode: extract and rename everything
     subdirs = check_subdirectories(local_audio_path)
     if subdirs:
         try:
             _ = extract_audios_and_move_original(local_audio_path)
         except Exception as e:
-            print(f"Error extracting audios: {e}")
-    prefix = f"{local_language.lower()}_phrasebook_"
+            print(f"❌ Error extracting audios: {e}")
+
     files_rename(local_audio_path,
                  prefix=prefix, suffix="",
                  replace="", by="",
                  remove_first=0, remove_last=0,
                  lower_all=True, upper_all=False,
                  extensions=(".mp3", ".wav"))
+
     subset_files_now, _ = get_audio(local_audio_path)
     working_input_dir = local_audio_path
 
@@ -678,11 +751,23 @@ else:
 REFERENCE_AUDIO = os.path.join(BASE_DIR, "Languages", "reference_audio.mp3")
 normalized_audio_path = working_input_dir / "gen1_normalized"
 
-batch_process_mp3s(
-    ref_english=REFERENCE_AUDIO,
+# batch_process_mp3s(
+#     input_folder=str(working_input_dir),
+#     output_folder=str(normalized_audio_path),
+#     files_to_process=subset_files_now,   # << only process subset
+#     silence_noise_db=-32.0,
+#     silence_min_dur=0.22,
+#     edge_guard_ms=80,
+#     apply_silence=False,
+#     preset="medium"
+# )
+
+timed_step(
+    f"Step 6 (Normalize {len(subset_files_now)} files)",
+    batch_process_mp3s,
     input_folder=str(working_input_dir),
     output_folder=str(normalized_audio_path),
-    files_to_process=subset_files_now,   # << only process subset
+    files_to_process=subset_files_now,
     silence_noise_db=-32.0,
     silence_min_dur=0.22,
     edge_guard_ms=80,
@@ -693,8 +778,14 @@ batch_process_mp3s(
 # ─────────────── PAD NORMALIZED AUDIO ───────────────────────────────────
 normalized_files_to_process = [normalized_audio_path / f.name for f in subset_files_now]
 normalized_padded_path = working_input_dir / "gen2_normalized_padded"
-export_padded_audios(normalized_files_to_process, out_dir=normalized_padded_path)
+# export_padded_audios(normalized_files_to_process, out_dir=normalized_padded_path)
 
+timed_step(
+    f"Step 7 (Pad {len(normalized_files_to_process)} files)",
+    export_padded_audios,
+    normalized_files_to_process,
+    out_dir=normalized_padded_path
+)
 # ──────────────  BILINGUAL AUDIO PRODUCTION (SUBSET ONLY) ───────────────
 Trailing_silent = AudioSegment.silent(duration=1000)
 Inside_silent   = AudioSegment.silent(duration=3000)
@@ -703,12 +794,63 @@ os.makedirs(bilingual_output_path, exist_ok=True)
 
 # Pass subset IDs directly so only filtered files are processed
 target_ids = {get_digits_numbers_from_string(f.name) for f in subset_files_now}
-merge_bilingual_audio(
+
+# merge_bilingual_audio(
+#     eng_audio_path,
+#     normalized_padded_path,
+#     bilingual_output_path,
+#     target_ids=target_ids
+# )
+
+timed_step(
+    f"Step 8 (Merge bilingual, {len(target_ids)} IDs)",
+    merge_bilingual_audio,
     eng_audio_path,
     normalized_padded_path,
     bilingual_output_path,
     target_ids=target_ids
 )
+
+def reduce_noise_from_audio(input_file, output_file):
+    """
+    Reduces noise from an audio file and saves the result.
+    
+    Args:
+        input_file (str): The path to the input audio file.
+        output_file (str): The path where the denoised audio will be saved.
+    """
+    try:
+        # Load the audio file
+        # sr=None keeps the original sampling rate of the audio
+        y, sr = librosa.load(input_file, sr=None)
+
+        # Apply noise reduction
+        # The 'y' is the audio signal, and 'sr' is the sampling rate
+        # stationary=True assumes the noise is consistent throughout the audio
+        reduced_noise_audio = nr.reduce_noise(y=y, 
+                                              sr=sr, 
+                                              stationary=True,n_fft=2048,)
+
+        # Save the denoised audio to a new file
+        # 'sf.write' handles various audio formats (e.g., .wav, .flac)
+        sf.write(output_file, reduced_noise_audio, sr)
+        print(f"Noise reduction complete! Denoised audio saved to {output_file}")
+    
+    except FileNotFoundError:
+        print(f"Error: The file {input_file} was not found.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+# ──────────────  NOISE REDUCTION (on bilingual output) ───────────────
+# This will overwrite existing files instead of creating denoised_ copies
+for file in bilingual_output_path.glob("*.mp3"):
+    try:
+        reduce_noise_from_audio(str(file), str(file))  # overwrite in place
+        
+        print(f"🔄 Overwritten with denoised: {file.name}")
+    except Exception as e:
+        print(f"❌ Error denoising {file.name}: {e}")
+
 
 # ──────────────  PER CHAPTER AUDIO PRODUCTION (SUBSET ONLY) ─────────────
 combined_chapters_audio_folder = bilingual_output_path / "bilingual_sentences_chapters"
@@ -721,13 +863,6 @@ bilingual_files = [f for f in bilingual_files if get_digits_numbers_from_string(
 # =====================================================
 song = None
 previous_chapter = None
-
-def is_new_file_better(temp_path, existing_path):
-    from pydub.utils import mediainfo
-    new_dur = float(mediainfo(str(temp_path))["duration"])
-    old_dur = float(mediainfo(str(existing_path))["duration"])
-    return new_dur > old_dur
-
 
 for audio in bilingual_files:
     base_audio = os.path.basename(audio)
@@ -789,3 +924,8 @@ if song and previous_chapter:
     else:
         song.export(output_path, format="mp3", bitrate="192k")
         print(f"✅ Exported {output_path.name}")
+
+# ─── Timer End ─────────────────────────────────────────────────
+end_time = time.perf_counter()
+elapsed = end_time - start_time
+logging.info(f"Script completed in {elapsed:.2f} seconds.")

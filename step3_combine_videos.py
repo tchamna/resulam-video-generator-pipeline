@@ -54,7 +54,7 @@ VIDEO_DIR  = ROOT / "Python_Scripts_Resulam_Phrasebooks_Audio_Processing"
 VIDEO_PATTERN = "{lang_lower}_sentence_{id}.mp4"
 OUTPUT_DIR = ROOT /"Languages"/f"{LANGUAGE.title()}Phrasebook"/ f"{LANGUAGE.title()}_Chapters_Combined"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
+# os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ── HELPERS ────────────────────────────────────────────────────────────
 def build_paths(lang: str, mode: str) -> Dict[str, Path]:
     lang_lower = lang.lower()

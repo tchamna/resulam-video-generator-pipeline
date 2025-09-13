@@ -60,8 +60,8 @@ BANNER_GAP_RATIO  = 0.30
 RIGHT_MARGIN_PX   = 25
 TOP_MARGIN_PX     = 15
 
-# PROD_OR_TEST = "Production"  # or "Test"
-PROD_OR_TEST = "Test"  # or "Test"
+PROD_OR_TEST = "Production"  # or "Test"
+# PROD_OR_TEST = "Test"  # or "Test"
 
 if PROD_OR_TEST == "Test":
     PROD_OR_TEST = "Test"
@@ -94,7 +94,13 @@ def build_paths(lang: str, mode: str) -> Dict[str, Path | str]:
     else:
         common = ROOT / "Backgrounds_Selected" / "Common"
         bg_dir = common if common.exists() else (ROOT / "Backgrounds_Selected")
-
+    
+    if PROD_OR_TEST == "Test":
+        local_audio_dir = ROOT / f"Languages/{lang_title}Phrasebook/{lang_title}Only{PROD_OR_TEST}" / "gen2_normalized_padded"
+    else:  # Production mode
+        local_audio_dir = ROOT / f"Languages/{lang_title}Phrasebook/{lang_title}Only" / "gen2_normalized_padded"
+    
+    
     return {
         "language": lang_title,
         "lang_lower": lang_lower,
@@ -134,6 +140,7 @@ def parse_sentences(txt: Path, lang_lower: str):
             except ValueError:
                 print(f"⚠ bad line: {ln.strip()}")
     return rows
+
 
 # ── CHAPTER RANGES ───────────────────────────────────────────────────────
 def chapter_ranges(sents: List[Dict]) -> List[tuple]:
@@ -216,6 +223,15 @@ def build_video(s: Dict, p: Dict, mode: str = "lecture",rebuild_video=False) -> 
 
     eng  = AudioFileClip(str(eng_path))
     nufi = AudioFileClip(str(nufi_path))
+    
+     # ▼▼▼ ADD THIS VALIDATION BLOCK ▼▼▼
+    if eng.duration is None or nufi.duration is None:
+        print(f"❌ id={s['id']} - Corrupted or unreadable audio file. Skipping.")
+        # It's good practice to close the clips if you're not going to use them
+        eng.close()
+        nufi.close()
+        return
+    # ▲▲▲ END OF ADDED BLOCK ▲▲▲
 
     mode_l = mode.lower().strip()
     if mode_l == "lecture":
@@ -307,6 +323,7 @@ def build_video(s: Dict, p: Dict, mode: str = "lecture",rebuild_video=False) -> 
         print(f"❌ id={s['id']} {e}")
         Path(tmp_mp4).unlink(missing_ok=True)
         Path(tmp_aac).unlink(missing_ok=True)
+
 
 # ── THREAD WORKER ────────────────────────────────────────────────────────
 sem = threading.Semaphore(PYTHON_JOBS)

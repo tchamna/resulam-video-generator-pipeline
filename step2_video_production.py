@@ -54,6 +54,7 @@ DEFAULT_INTRO = "Listen, repeat and translate:"
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ── PATH SETUP ──────────────────────────────────────────────────────────
+# language = LANGUAGE
 def get_project_paths(language: str, mode: str) -> Dict[str, Path | str]:
     language_title = language.title()
     language_lower = language.lower()
@@ -65,12 +66,16 @@ def get_project_paths(language: str, mode: str) -> Dict[str, Path | str]:
     background_dir = ROOT_DIR / "Backgrounds_Selected" / language_title
     if not background_dir.exists():
         background_dir = ROOT_DIR / "Backgrounds_Selected" / "Common"
-
+    
+    if PROJECT_MODE == "Test":
+        local_audio_dir = ROOT_DIR / f"Languages/{language_title}Phrasebook/{language_title}Only{PROJECT_MODE}" / "gen2_normalized_padded"
+    else:  # Production mode
+        local_audio_dir = ROOT_DIR / f"Languages/{language_title}Phrasebook/{language_title}Only" / "gen2_normalized_padded"
     return {
         "language": language_title,
         "lang_lower": language_lower,
         "background_dir": background_dir,
-        "local_audio_dir": ROOT_DIR / f"Languages/{language_title}Phrasebook/{language_title}Only{PROJECT_MODE}" / "gen2_normalized_padded",
+        "local_audio_dir": local_audio_dir,
         "english_audio_dir": ROOT_DIR / "EnglishOnly",
         "output_dir": output_dir,
         "sentence_file": ROOT_DIR / f"Languages/{language_title}Phrasebook/{language_lower}_english_french_phrasebook_sentences_list.txt",
@@ -276,13 +281,377 @@ def create_video_clip(sentence: Dict, paths: Dict, mode: str):
         Path(temp_audio_file).unlink(missing_ok=True)
         Path(temp_video_file).unlink(missing_ok=True)
 
+
+# def create_video_clip(sentence: Dict, paths: Dict, mode: str):
+#     """
+#     Build a single video clip for one sentence.
+#     Ensures all clips and audio have proper durations, fps, and sizes.
+#     """
+
+#     print(f"▶ Creating video for sentence ID {sentence['id']}")
+
+#     output_path = paths["output_dir"] / f"{paths['lang_lower']}_sentence_{sentence['id']}.mp4"
+#     if output_path.exists() and not REBUILD_ALL:
+#         print(f"✔ Skipped (already exists): {output_path.name}")
+#         return
+
+#     local_audio_path = paths["local_audio_dir"] / sentence["local_audio"]
+#     english_audio_path = paths["english_audio_dir"] / sentence["english_audio"]
+
+#     if not local_audio_path.exists() or not english_audio_path.exists():
+#         print(f"⚠ Missing audio for sentence {sentence['id']}")
+#         return
+
+#     # Load audio
+#     local_audio = AudioFileClip(str(local_audio_path))
+#     english_audio = AudioFileClip(str(english_audio_path))
+
+#     # Guard: check audio durations
+#     if english_audio.duration is None or local_audio.duration is None:
+#         print(f"⚠ Could not read audio duration for sentence {sentence['id']}")
+#         return
+
+#     # --- Audio sequencing ---
+#     if mode == "lecture":
+#         total_duration = (
+#             english_audio.duration + REPEAT_PAUSE_SECONDS +
+#             local_audio.duration + TRAILING_PAUSE_SECONDS
+#         )
+#         audio = CompositeAudioClip([
+#             english_audio.set_start(0),
+#             local_audio.set_start(english_audio.duration + REPEAT_PAUSE_SECONDS)
+#         ])
+#     else:  # homework mode
+#         d = local_audio.duration
+#         pause = REPEAT_PAUSE_SECONDS
+#         nufi_1_start = 0
+#         nufi_2_start = d + pause
+#         nufi_3_start = nufi_2_start + d + pause
+#         eng_start = nufi_3_start + d + pause
+#         total_duration = eng_start + english_audio.duration + TRAILING_PAUSE_SECONDS
+
+#         audio = CompositeAudioClip([
+#             local_audio.set_start(nufi_1_start),
+#             local_audio.set_start(nufi_2_start),
+#             local_audio.set_start(nufi_3_start),
+#             english_audio.set_start(eng_start),
+#         ])
+
+#     # Force audio duration
+#     if audio.duration is None:
+#         audio = audio.set_duration(total_duration)
+
+#     font_size = calculate_font_size(sentence)
+#     clips = []
+
+#     # Background
+#     clips.append(
+#         ImageClip(str(sentence["background"])).set_duration(total_duration)
+#     )
+
+#     def add_text(text, color, start, duration, y_offset, font_size, wrap=True):
+#         if not text.strip():  # skip empty strings
+#             return y_offset
+#         size = (VIDEO_RESOLUTION[0] - 200, None) if wrap else None
+#         clip = TextClip(
+#             text, font=str(FONT_PATH), fontsize=font_size,
+#             color=color, method="caption" if wrap else "label", size=size
+#         ).set_position(("center", y_offset)).set_start(start).set_duration(duration)
+#         clips.append(clip)
+#         return y_offset + clip.h + int(font_size * 0.2)
+
+#     # --- Header row ---
+#     y_header = MARGIN_TOP
+#     clips.append(
+#         TextClip(paths["language"], font=str(FONT_PATH),
+#                  fontsize=int(font_size * 0.55), color="yellow", method="label")
+#         .set_position((15, y_header)).set_duration(total_duration)
+#     )
+
+#     support_clip = TextClip("Please Support Resulam", font=str(FONT_PATH),
+#                             fontsize=int(font_size * 0.5), color="yellow", method="label")
+#     support_clip = support_clip.set_position(("right", y_header)).set_duration(total_duration)
+#     clips.append(support_clip)
+
+#     # Sentence number
+#     sentence_number = str(sentence["id"])
+#     num_clip = TextClip(sentence_number, font=str(FONT_PATH),
+#                         fontsize=int(font_size * 0.6), color="white", method="label")
+#     num_clip = num_clip.set_position(
+#         (VIDEO_RESOLUTION[0] - num_clip.w - MARGIN_RIGHT,
+#          y_header + support_clip.h + int(font_size * 0.15))
+#     ).set_duration(total_duration)
+#     clips.append(num_clip)
+
+#     # --- Captions ---
+#     y_text = y_header + int(font_size * HEADER_GAP_RATIO) + 80
+#     if mode == "lecture":
+#         y_text = add_text(sentence["source"], "white", 0, total_duration, y_text, font_size)
+#         y_text = add_text(sentence["english"], "yellow", 0, total_duration, y_text, font_size)
+#         _ = add_text(sentence["french"], "white", 0, total_duration, y_text, font_size)
+#     else:
+#         intro_msg = INTRO_MESSAGES.get(paths["language"], DEFAULT_INTRO)
+
+#         y_text = add_text(intro_msg, "white", 0, nufi_2_start, y_text, font_size)
+#         y_text = add_text("Listen, repeat and translate", "yellow", 0, nufi_2_start, y_text, font_size)
+
+#         y_text = add_text(sentence["source"], "white", nufi_2_start, nufi_3_start - nufi_2_start, y_text, font_size)
+
+#         y_text = add_text(sentence["source"], "white", nufi_3_start, total_duration - nufi_3_start, y_text, font_size)
+#         y_text = add_text(sentence["english"], "yellow", nufi_3_start, total_duration - nufi_3_start, y_text, font_size)
+#         _ = add_text(sentence["french"], "white", nufi_3_start, total_duration - nufi_3_start, y_text, font_size)
+
+#     # Logos
+#     for side in ["left", "right"]:
+#         clips.append(
+#             ImageClip(str(LOGO_PATH)).resize(height=100)
+#             .set_position((side, "bottom")).set_duration(total_duration)
+#         )
+
+#     # --- Debug: check durations & sizes ---
+#     for i, c in enumerate(clips):
+#         if c.duration is None:
+#             print(f"⚠ Clip {i} ({c.__class__.__name__}) had no duration, forcing to {total_duration}")
+#             c = c.set_duration(total_duration)
+#         if getattr(c, "w", None) is None or getattr(c, "h", None) is None:
+#             print(f"⚠ Clip {i} ({c.__class__.__name__}) has invalid size: {c.w}x{c.h}")
+
+#     # --- Final audio sanity checks ---
+#     if hasattr(audio, "clips"):
+#         for i, a in enumerate(audio.clips):
+#             if a.duration is None:
+#                 print(f"⚠ Fixing subclip {i} duration → {total_duration}")
+#                 a = a.set_duration(total_duration)
+#             if getattr(a, "fps", None) is None:
+#                 print(f"⚠ Fixing subclip {i} fps → 44100")
+#                 a.fps = 44100
+#             if getattr(a, "nframes", None) is None and a.duration is not None:
+#                 a.nframes = int(a.duration * a.fps)
+#                 print(f"⚠ Fixing subclip {i} nframes → {a.nframes}")
+
+#     if audio.duration is None:
+#         audio = audio.set_duration(total_duration)
+#     if getattr(audio, "fps", None) is None:
+#         audio.fps = 44100
+#     if getattr(audio, "nframes", None) is None and audio.duration is not None:
+#         audio.nframes = int(audio.duration * audio.fps)
+
+#     print(f"✔ Final audio: duration={audio.duration}, fps={audio.fps}, nframes={getattr(audio,'nframes',None)}")
+#     print(f"✔ All durations OK for sentence {sentence['id']} → {total_duration:.2f} sec")
+
+#     # --- Render ---
+#     temp_audio_file = f"temp_audio_{uuid4().hex}.m4a"
+#     temp_video_file = output_path.with_suffix(".tmp.mp4")
+#     try:
+#         CompositeVideoClip(clips).set_audio(audio).write_videofile(
+#             str(temp_video_file), fps=FRAME_RATE, codec="libx264", audio_codec="aac",
+#             temp_audiofile=temp_audio_file, remove_temp=True,
+#             ffmpeg_params=["-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1", "-movflags", "+faststart"],
+#             preset="ultrafast", threads=FFMPEG_THREADS,
+#         )
+#         shutil.move(temp_video_file, output_path)
+#         print(f"✅ Rendered: {output_path.name}")
+#     except Exception as error:
+#         print(f"❌ Error rendering sentence {sentence['id']}: {error}")
+#         Path(temp_audio_file).unlink(missing_ok=True)
+#         Path(temp_video_file).unlink(missing_ok=True)
+
+# def create_video_clip(sentence: Dict, paths: Dict, mode: str):
+#     """
+#     Build a single video clip for one sentence.
+#     Ensures all clips and audio have proper durations, fps, and sizes.
+#     """
+
+#     print(f"▶ Creating video for sentence ID {sentence['id']}")
+
+#     output_path = paths["output_dir"] / f"{paths['lang_lower']}_sentence_{sentence['id']}.mp4"
+#     if output_path.exists() and not REBUILD_ALL:
+#         print(f"✔ Skipped (already exists): {output_path.name}")
+#         return
+
+#     local_audio_path = paths["local_audio_dir"] / sentence["local_audio"]
+#     english_audio_path = paths["english_audio_dir"] / sentence["english_audio"]
+
+#     if not local_audio_path.exists() or not english_audio_path.exists():
+#         print(f"⚠ Missing audio for sentence {sentence['id']}")
+#         return
+
+#     # Load audio
+#     local_audio = AudioFileClip(str(local_audio_path))
+#     english_audio = AudioFileClip(str(english_audio_path))
+
+#     # Guard: check audio durations
+#     if english_audio.duration is None or local_audio.duration is None:
+#         print(f"⚠ Could not read audio duration for sentence {sentence['id']}")
+#         return
+
+#     # --- Audio sequencing ---
+#     if mode == "lecture":
+#         total_duration = (
+#             english_audio.duration + REPEAT_PAUSE_SECONDS +
+#             local_audio.duration + TRAILING_PAUSE_SECONDS
+#         )
+#         audio = CompositeAudioClip([
+#             english_audio.set_start(0),
+#             local_audio.set_start(english_audio.duration + REPEAT_PAUSE_SECONDS)
+#         ])
+#     else:  # homework mode
+#         d = local_audio.duration
+#         pause = REPEAT_PAUSE_SECONDS
+#         nufi_1_start = 0
+#         nufi_2_start = d + pause
+#         nufi_3_start = nufi_2_start + d + pause
+#         eng_start = nufi_3_start + d + pause
+#         total_duration = eng_start + english_audio.duration + TRAILING_PAUSE_SECONDS
+
+#         audio = CompositeAudioClip([
+#             local_audio.set_start(nufi_1_start),
+#             local_audio.set_start(nufi_2_start),
+#             local_audio.set_start(nufi_3_start),
+#             english_audio.set_start(eng_start),
+#         ])
+
+#     # Force audio duration
+#     if audio.duration is None:
+#         audio = audio.set_duration(total_duration)
+
+#     font_size = calculate_font_size(sentence)
+#     clips = []
+
+#     # Background
+#     clips.append(
+#         ImageClip(str(sentence["background"])).set_duration(total_duration)
+#     )
+
+#     def add_text(text, color, start, duration, y_offset, font_size, wrap=True):
+#         if not text.strip():  # skip empty strings
+#             return y_offset
+#         size = (VIDEO_RESOLUTION[0] - 200, None) if wrap else None
+#         clip = TextClip(
+#             text, font=str(FONT_PATH), fontsize=font_size,
+#             color=color, method="caption" if wrap else "label", size=size
+#         ).set_position(("center", y_offset)).set_start(start).set_duration(duration)
+#         clips.append(clip)
+#         return y_offset + clip.h + int(font_size * 0.2)
+
+#     # --- Header row ---
+#     y_header = MARGIN_TOP
+#     clips.append(
+#         TextClip(paths["language"], font=str(FONT_PATH),
+#                  fontsize=int(font_size * 0.55), color="yellow", method="label")
+#         .set_position((15, y_header)).set_duration(total_duration)
+#     )
+
+#     support_clip = TextClip("Please Support Resulam", font=str(FONT_PATH),
+#                             fontsize=int(font_size * 0.5), color="yellow", method="label")
+#     support_clip = support_clip.set_position(("right", y_header)).set_duration(total_duration)
+#     clips.append(support_clip)
+
+#     # Sentence number
+#     sentence_number = str(sentence["id"])
+#     num_clip = TextClip(sentence_number, font=str(FONT_PATH),
+#                         fontsize=int(font_size * 0.6), color="white", method="label")
+#     num_clip = num_clip.set_position(
+#         (VIDEO_RESOLUTION[0] - num_clip.w - MARGIN_RIGHT,
+#          y_header + support_clip.h + int(font_size * 0.15))
+#     ).set_duration(total_duration)
+#     clips.append(num_clip)
+
+#     # --- Captions ---
+#     y_text = y_header + int(font_size * HEADER_GAP_RATIO) + 80
+#     if mode == "lecture":
+#         y_text = add_text(sentence["source"], "white", 0, total_duration, y_text, font_size)
+#         y_text = add_text(sentence["english"], "yellow", 0, total_duration, y_text, font_size)
+#         _ = add_text(sentence["french"], "white", 0, total_duration, y_text, font_size)
+#     else:
+#         intro_msg = INTRO_MESSAGES.get(paths["language"], DEFAULT_INTRO)
+
+#         y_text = add_text(intro_msg, "white", 0, nufi_2_start, y_text, font_size)
+#         y_text = add_text("Listen, repeat and translate", "yellow", 0, nufi_2_start, y_text, font_size)
+
+#         y_text = add_text(sentence["source"], "white", nufi_2_start, nufi_3_start - nufi_2_start, y_text, font_size)
+
+#         y_text = add_text(sentence["source"], "white", nufi_3_start, total_duration - nufi_3_start, y_text, font_size)
+#         y_text = add_text(sentence["english"], "yellow", nufi_3_start, total_duration - nufi_3_start, y_text, font_size)
+#         _ = add_text(sentence["french"], "white", nufi_3_start, total_duration - nufi_3_start, y_text, font_size)
+
+#     # Logos
+#     for side in ["left", "right"]:
+#         clips.append(
+#             ImageClip(str(LOGO_PATH)).resize(height=100)
+#             .set_position((side, "bottom")).set_duration(total_duration)
+#         )
+
+#     # --- Debug: check durations & sizes ---
+#     for i, c in enumerate(clips):
+#         if c.duration is None:
+#             print(f"⚠ Clip {i} ({c.__class__.__name__}) had no duration, forcing to {total_duration}")
+#             c = c.set_duration(total_duration)
+#         if getattr(c, "w", None) is None or getattr(c, "h", None) is None:
+#             print(f"⚠ Clip {i} ({c.__class__.__name__}) has invalid size: {c.w}x{c.h}")
+
+#     # --- Final audio sanity checks ---
+#     if hasattr(audio, "clips"):
+#         fixed_subclips = []
+#         for i, a in enumerate(audio.clips):
+#             if a.duration is None:
+#                 print(f"⚠ Fixing subclip {i} duration → {total_duration}")
+#                 a = a.set_duration(total_duration)
+#             if getattr(a, "fps", None) is None:
+#                 print(f"⚠ Fixing subclip {i} fps → 44100")
+#                 a.fps = 44100
+#             if getattr(a, "nframes", None) is None and a.duration is not None:
+#                 a.nframes = int(a.duration * a.fps)
+#                 print(f"⚠ Fixing subclip {i} nframes → {a.nframes}")
+#             fixed_subclips.append(a)
+#         audio.clips = fixed_subclips  # overwrite with fixed
+
+#     if audio.duration is None:
+#         audio = audio.set_duration(total_duration)
+#     if getattr(audio, "fps", None) is None:
+#         audio.fps = 44100
+#     if getattr(audio, "nframes", None) is None and audio.duration is not None:
+#         audio.nframes = int(audio.duration * audio.fps)
+
+#     print(f"✔ Final audio: duration={audio.duration}, fps={audio.fps}, nframes={getattr(audio,'nframes',None)}")
+#     print(f"✔ All durations OK for sentence {sentence['id']} → {total_duration:.2f} sec")
+
+#     # --- Render ---
+#     temp_audio_file = f"temp_audio_{uuid4().hex}.wav"   # safer than .m4a
+#     temp_video_file = output_path.with_suffix(".tmp.mp4")
+#     try:
+#         CompositeVideoClip(clips).set_audio(audio).write_videofile(
+#             str(temp_video_file),
+#             fps=FRAME_RATE,
+#             codec="libx264",
+#             audio_codec="aac",
+#             temp_audiofile=temp_audio_file,
+#             remove_temp=True,
+#             ffmpeg_params=[
+#                 "-pix_fmt", "yuv420p",
+#                 "-profile:v", "high",
+#                 "-level", "4.1",
+#                 "-movflags", "+faststart"
+#             ],
+#             preset="ultrafast",
+#             threads=FFMPEG_THREADS,
+#             audio_fps=44100,   # ensure proper sample rate
+#             verbose=True,
+#             logger="bar"
+#         )
+#         shutil.move(temp_video_file, output_path)
+#         print(f"✅ Rendered: {output_path.name}")
+#     except Exception as error:
+#         print(f"❌ Error rendering sentence {sentence['id']}: {error}")
+#         Path(temp_audio_file).unlink(missing_ok=True)
+#         Path(temp_video_file).unlink(missing_ok=True)
+#         return  # gracefully skip on error
+
 # ── MULTI-THREAD RENDERING ──────────────────────────────────────────────
 # chapter_ranges = chapters
 # sentences = tagged_sentences
 # paths = config
 # mode = MODE 
-
-# ── MULTI-THREAD RENDERING ──────────────────────────────────────────────
 
 def render_all_sentences(
     sentences: List[Dict],
@@ -349,7 +718,7 @@ def render_all_sentences(
         )
 
     threads: list[threading.Thread] = []
-    for chapter_index, (start_id, end_id) in enumerate(chapter_ranges, start=1):
+    for chapter_index, (start_id, end_id)  in enumerate(chapter_ranges, start=1):
         if chapter_index < start_chapter:
             continue
         if chapter_index > end_chapter:
@@ -375,13 +744,12 @@ def render_all_sentences(
 # ── ENTRY POINT ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     
-    start_chapter=27
-    end_chapter=29
+    start_chapter=1
+    end_chapter=32
     
-    start_sentence=1638
-    end_sentence=1638
-    
-   
+    start_sentence, end_sentence=1638, 1638
+    start_sentence, end_sentence=None, None
+
     config = get_project_paths(LANGUAGE, MODE)
     raw_sentences = load_sentences(config["sentence_file"], 
                                    config["lang_lower"])
