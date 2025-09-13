@@ -25,8 +25,8 @@ test_moviepy.py
 *.log
 *.tmp
 *.temp
-tmp-*.m4a          # temp audio created by MoviePy
-*.tmp.mp4          # temp video before rename
+tmp-*.m4a # temp audio created by MoviePy
+*.tmp.mp4 # temp video before rename
 *.csv
 *.sqlite
 *.db
@@ -44,7 +44,6 @@ Backgrounds_Selected/
 # *.jpg
 # *.jpeg
 *.docx
-other_helpers/ 
 
 # --- Assets rules -------------------------------------------------
 # Ignore these two specific subdirectories
@@ -52,10 +51,6 @@ Assets/Results_Audios/
 Assets/Results_Videos/
 
 # Ignore results outputs
-
 **/Results_Audios/
 **/Results_Videos/
-
-
-# Allow everything else inside Assets
-!Assets/**
+**assets/other_helpers/Word_document_processing.py

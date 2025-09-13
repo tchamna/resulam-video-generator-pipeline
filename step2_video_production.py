@@ -37,8 +37,8 @@ MAX_PARALLEL_JOBS = min(MAX_PARALLEL_JOBS, AVAILABLE_CPUS // FFMPEG_THREADS)
 
 # ── PATHS SETUP ─────────────────────────────────────────────────────
 BASE_DIR = Path(os.getcwd())
-FONT_PATH = BASE_DIR / "Assets"/ "Fonts" / "arialbd.ttf"
-LOGO_PATH = BASE_DIR/ "Assets" / "resulam_logo_resurrectionLangue.png"
+FONT_PATH = BASE_DIR / "assets"/ "Fonts" / "arialbd.ttf"
+LOGO_PATH = BASE_DIR/ "assets" / "resulam_logo_resurrectionLangue.png"
 
 # ── FONTS SETUP ─────────────────────────────────────────────────────
 
@@ -64,18 +64,25 @@ DEFAULT_INTRO = "Listen, repeat and translate:"
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-
 # ── LOGGING CONFIG ──────────────────────────────────────────────────────
-log_file = Path(__file__).with_suffix(".log")  # saves alongside your script
+assets_dir = BASE_DIR / "assets"
+log_dir = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook"/"Logs"
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# Use the script name but place it inside the Phrasebook folder
+log_file = log_dir / Path(__file__).with_suffix(".log").name
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
     datefmt="%H:%M:%S",
     handlers=[
-        logging.FileHandler(log_file, mode="w", encoding="utf-8"),  # write to file
-        logging.StreamHandler()  # also keep printing to console
+        logging.FileHandler(log_file, mode="w", encoding="utf-8"),
+        logging.StreamHandler()
     ]
 )
+
+
 
 @contextmanager
 def log_time(step_name: str):
@@ -101,7 +108,7 @@ def get_project_paths(language: str, mode: str):
     language_lower = language.lower()
     mode_folder = "Lecture" if mode.lower() == "lecture" else "Homework"
 
-    assets_dir = BASE_DIR / "Assets"
+    assets_dir = BASE_DIR / "assets"
 
     # Output directory (always created)
     output_dir = assets_dir / "Languages" / f"{local_language_title}Phrasebook" / "Results_Videos" / mode_folder
@@ -114,7 +121,7 @@ def get_project_paths(language: str, mode: str):
     # Local audio: depends on PROJECT_MODE
     suffix = "OnlyTest" if PROJECT_MODE.lower() == "test" else "Only"
     # local_audio_dir = assets_dir / "Languages" / f"{local_language_title}Phrasebook" / f"{local_language_title}{suffix}" / "gen2_normalized_padded"
-    local_audio_dir = BASE_DIR /"Assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen2_normalized_padded"
+    local_audio_dir = BASE_DIR /"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen2_normalized_padded"
 
     return {
         "language": local_language_title,
@@ -219,7 +226,7 @@ def create_video_clip(sentence: Dict, paths: Dict, mode: str):
         return
 
     local_audio_path = paths["local_audio_dir"] / sentence["local_audio"]
-    english_audio_path = BASE_DIR/"Assets"/"EnglishOnly" / sentence["english_audio"]
+    english_audio_path = BASE_DIR/"assets"/"EnglishOnly" / sentence["english_audio"]
 
     if not local_audio_path.exists() or not english_audio_path.exists():
         print(f"⚠ Missing audio for sentence {sentence['id']}")

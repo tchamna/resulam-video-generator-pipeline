@@ -26,6 +26,10 @@ import os, random, re, time
 from pathlib import Path
 from typing import List, Dict, Iterable
 from moviepy.editor import VideoFileClip, concatenate_videoclips
+
+import logging
+from contextlib import contextmanager
+
 # from moviepy import VideoFileClip, concatenate_videoclips  # ← for MoviePy 2.x
 
 # ── USER SETTINGS ──────────────────────────────────────────────────────
@@ -44,8 +48,8 @@ CHUNK_SIZE = 10
 
 # Control which chapters to process
 SINGLE_CHAPTER = None   # e.g., 12 → only Chapter 12
-START_CHAPTER  = 27     # default = 1
-END_CHAPTER    = 27     # None = until last chapter
+START_CHAPTER  = 1     # default = 1
+END_CHAPTER    = 32     # None = until last chapter
 
 # Excluded sentence IDs
 EXCLUDED_SENTENCES = {
@@ -55,27 +59,72 @@ EXCLUDED_SENTENCES = {
 }
 
 # ── FOLDER LAYOUT ──────────────────────────────────────────────────────
+
+MODE = "lecture"            # "lecture" or "homework"
+# MODE = "homework"            # "lecture" or "homework"
 VIDEO_DIR  = BASE_DIR / "Python_Scripts_Resulam_Phrasebooks_Audio_Processing"
 
-assets_dir = BASE_DIR / "Assets"
+assets_dir = BASE_DIR / "assets"
 
 # Output directory (always created)
-VIDEO_DIR = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook" / "Results_Videos" / mode_folder
+VIDEO_DIR = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook" / "Results_Videos" / f"{MODE.title()}"
 
 VIDEO_PATTERN = "{lang_lower}_sentence_{id}.mp4"
-OUTPUT_DIR = BASE_DIR /"Languages"/f"{LANGUAGE.title()}Phrasebook"/ f"{LANGUAGE.title()}_Chapters_Combined"
+OUTPUT_DIR = VIDEO_DIR / f"{LANGUAGE.title()}_Chapters_Combined"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# ── LOGGING CONFIG ──────────────────────────────────────────────────────
+assets_dir = BASE_DIR / "assets"
+log_dir = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook"/"Logs"
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# Use the script name but place it inside the Phrasebook folder
+log_file = log_dir / Path(__file__).with_suffix(".log").name
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[
+        logging.FileHandler(log_file, mode="w", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+
+
+def format_elapsed(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.2f} sec"
+    elif seconds < 3600:
+        return f"{seconds/60:.2f} min"
+    elif seconds < 86400:
+        return f"{seconds/3600:.2f} hr"
+    else:
+        return f"{seconds/86400:.2f} days"
+
+@contextmanager
+def log_time(step_name: str):
+    start = time.perf_counter()
+    logging.info(f"▶️ Starting {step_name}…")
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - start
+        logging.info(f"⏱ Finished {step_name} in {format_elapsed(elapsed)}")
+
+        
 # ── HELPERS ────────────────────────────────────────────────────────────
-def build_paths(lang: str, mode: str) -> Dict[str, Path]:
-    lang_lower = lang.lower()
-    out_dir = VIDEO_DIR / f"{lang.title()}/{mode.title()}"
-    txt = BASE_DIR / f"Languages/{lang}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt"
+def build_paths() -> Dict[str, Path]:
+    lang_lower = LANGUAGE.lower()
+    out_dir = VIDEO_DIR 
+    out_dir.mkdir(parents=True, exist_ok=True)
+    phrase_book_list = BASE_DIR/ "assets" / f"Languages/{LANGUAGE.title()}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt"
     if not out_dir.exists():
         raise FileNotFoundError(f"Sentence-video folder not found: {out_dir}")
-    if not txt.exists():
-        raise FileNotFoundError(f"Cannot locate sentence list: {txt}")
-    return {"lang_lower": lang_lower, "out_dir": out_dir, "sent_txt": txt}
+    if not phrase_book_list.exists():
+        raise FileNotFoundError(f"Cannot locate sentence list: {phrase_book_list}")
+    return {"lang_lower": lang_lower, "out_dir": out_dir, "sentences_txt": phrase_book_list}
 
 def parse_chapters(txt_file: Path) -> Dict[int, List[int]]:
     """Return {chapter_number: [sentence_id,…]} preserving original order."""
@@ -154,8 +203,8 @@ def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path], lang_lowe
 def main() -> None:
     random.seed(SHUFFLE_SEED)
 
-    paths = build_paths(LANGUAGE, MODE)
-    chapter_map = parse_chapters(paths["sent_txt"])
+    paths = build_paths()
+    chapter_map = parse_chapters(paths["sentences_txt"])
     if not chapter_map:
         print("⚠ No chapters detected – nothing to do.")
         return
@@ -191,6 +240,50 @@ def main() -> None:
 
         for chunk_idx, sub in enumerate(chunk(clip_paths, CHUNK_SIZE), start=1):
             write_chunk(chap_num, chunk_idx, sub, paths["lang_lower"])
+
+def main() -> None:
+    random.seed(SHUFFLE_SEED)
+
+    with log_time("Chapter Combiner"):
+        paths = build_paths()
+        chapter_map = parse_chapters(paths["sentences_txt"])
+        if not chapter_map:
+            print("⚠ No chapters detected – nothing to do.")
+            return
+
+        # --- Chapter selection ---
+        if SINGLE_CHAPTER is not None:
+            chapter_map = {c: ids for c, ids in chapter_map.items() if c == SINGLE_CHAPTER}
+            print(f"✅ Processing only Chapter {SINGLE_CHAPTER}")
+        else:
+            last_chapter = max(chapter_map)
+            start = START_CHAPTER or 1
+            end   = END_CHAPTER or last_chapter
+            if start > end:
+                raise ValueError(f"Invalid chapter range: start {start} > end {end}")
+            chapter_map = {c: ids for c, ids in chapter_map.items() if start <= c <= end}
+            print(f"✅ Processing Chapters {start}–{end}")
+
+        # --- Process each chapter ---
+        for chap_num, sentence_ids in chapter_map.items():
+            with log_time(f"Chapter {chap_num}"):
+                # Exclude sentences
+                sentence_ids = [sid for sid in sentence_ids if sid not in EXCLUDED_SENTENCES]
+                if not sentence_ids:
+                    print(f"⚠ Chapter {chap_num}: all sentences excluded – skipped")
+                    continue
+
+                clip_paths = gather_clips(sentence_ids, paths["lang_lower"], paths["out_dir"])
+                if not clip_paths:
+                    print(f"⚠ Chapter {chap_num}: no clips found – skipped")
+                    continue
+
+                if MODE == "homework":
+                    random.shuffle(clip_paths)
+
+                for chunk_idx, sub in enumerate(chunk(clip_paths, CHUNK_SIZE), start=1):
+                    with log_time(f"Chapter {chap_num} chunk {chunk_idx}"):
+                        write_chunk(chap_num, chunk_idx, sub, paths["lang_lower"])
 
 if __name__ == "__main__":
     main()

@@ -85,23 +85,30 @@ def get_nth_parent_directory(path: Path, n: int) -> Path:
     return path
 
 local_lang_audio_dir_name = f"{local_language_title}Only" if test_or_production == "production" else f"{local_language_title}OnlyTest"
-local_language_dir = (BASE_DIR /"Assets"/ "Languages" / f"{local_language_title}Phrasebook" / local_lang_audio_dir_name).resolve()
+local_language_dir = (BASE_DIR /"assets"/ "Languages" / f"{local_language_title}Phrasebook" / local_lang_audio_dir_name).resolve()
 local_audio_path = local_language_dir
-eng_audio_path = BASE_DIR/"Assets" / "EnglishOnly"
+eng_audio_path = BASE_DIR/"assets" / "EnglishOnly"
 print("Starting audio directory setup...")
 
 
-# ─── Setup Logging ─────────────────────────────────────────────
-log_file = BASE_DIR /"Assets"/ "Languages" / f"{local_language_title}Phrasebook"  / f"processing_{local_language}.log"
+# ── LOGGING CONFIG ──────────────────────────────────────────────────────
+assets_dir = BASE_DIR / "assets"
+log_dir = assets_dir / "Languages" / f"{local_language_title}Phrasebook"/"Logs"
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# Use the script name but place it inside the Phrasebook folder
+log_file = log_dir / Path(__file__).with_suffix(".log").name
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%H:%M:%S",
     handlers=[
-        logging.FileHandler(log_file, encoding="utf-8"),
-        logging.StreamHandler()  # also print to console
+        logging.FileHandler(log_file, mode="w", encoding="utf-8"),
+        logging.StreamHandler()
     ]
 )
+
 
 # ─── Subdirectory Check ─────────────────────────────────────────────────
 def check_subdirectories(directory: Path) -> list:
@@ -744,7 +751,7 @@ else:
 
 # ─────────────── NORMALIZE AUDIO (ONLY THE SUBSET) ──────────────────────
 # normalized_audio_path = working_input_dir / "gen1_normalized"
-normalized_audio_path = BASE_DIR /"Assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen1_normalized"
+normalized_audio_path = BASE_DIR /"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen1_normalized"
 normalized_audio_path.mkdir(parents=True, exist_ok=True)
 
 # batch_process_mp3s(
@@ -774,7 +781,7 @@ timed_step(
 # ─────────────── PAD NORMALIZED AUDIO ───────────────────────────────────
 normalized_files_to_process = [normalized_audio_path / f.name for f in subset_files_now]
 # normalized_padded_path = working_input_dir / "gen2_normalized_padded"
-normalized_padded_path = BASE_DIR/"Assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen2_normalized_padded"
+normalized_padded_path = BASE_DIR/"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen2_normalized_padded"
 normalized_padded_path.mkdir(parents=True, exist_ok=True)
 
 # export_padded_audios(normalized_files_to_process, out_dir=normalized_padded_path)
@@ -789,7 +796,7 @@ timed_step(
 Trailing_silent = AudioSegment.silent(duration=1000)
 Inside_silent   = AudioSegment.silent(duration=3000)
 # bilingual_output_path = working_input_dir / "gen3_bilingual_sentences"
-bilingual_output_path = BASE_DIR /"Assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen3_bilingual_sentences"
+bilingual_output_path = BASE_DIR /"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen3_bilingual_sentences"
 bilingual_output_path.mkdir(parents=True, exist_ok=True)
 
 # Pass subset IDs directly so only filtered files are processed
