@@ -19,6 +19,11 @@ LANGUAGE  = "Duala"
 MODE      = "lecture"
 BASE_DIR  = Path(os.getcwd())
 
+# Choose mode
+USE_PARALLEL = True   # 🔁 Set to False for sequential processing
+FILES_TO_PROCESS = [] # ["sentence_001.mp4", "sentence_005.mp3"]  # leave empty to process all
+FILES_TO_PROCESS = ["duala_chapter_1_chunk_17.mp4","duala_chapter_2_chunk_01.mp4"] # ["sentence_001.mp4", "sentence_005.mp3"]  # leave empty to process all
+
 if "USE_PRIVATE_ASSETS" in os.environ:
     USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
     print("using Private Assets from env variable")
@@ -123,23 +128,38 @@ def process_file(filename: str, music_path: str, combined_dir: str, output_dir: 
 
 # ── MAIN ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    with log_time("Total parallel processing"):
-        files = [
+    with log_time("Total processing"):
+        all_files = [
             f for f in natsorted(os.listdir(COMBINED_VIDEO_DIR))
             if f.endswith(('.mp3', '.mp4', '.avi', '.mov')) and "Kiss the Sky" not in f
         ]
 
-        workers = max(1, multiprocessing.cpu_count() - 1)  # leave 1 core free
-        logging.info(f"⚡ Using {workers} parallel workers for {len(files)} files")
+        # If user provided a specific list, filter down
+        if FILES_TO_PROCESS:
+            files = [f for f in all_files if f in FILES_TO_PROCESS]
+        else:
+            files = all_files
 
-        results = []
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            future_to_file = {
-                executor.submit(process_file, f, str(MUSIC_PATH), str(COMBINED_VIDEO_DIR), str(output_folder)): f
-                for f in files
-            }
-            for future in as_completed(future_to_file):
-                result = future.result()
+        logging.info(f"🎯 Files selected: {len(files)}")
+
+        if USE_PARALLEL:
+            workers = max(1, multiprocessing.cpu_count() - 1)
+            logging.info(f"⚡ Parallel mode ON → using {workers} workers")
+            results = []
+            with ProcessPoolExecutor(max_workers=workers) as executor:
+                future_to_file = {
+                    executor.submit(process_file, f, str(MUSIC_PATH), str(COMBINED_VIDEO_DIR), str(output_folder)): f
+                    for f in files
+                }
+                for future in as_completed(future_to_file):
+                    result = future.result()
+                    logging.info(result)
+                    results.append(result)
+        else:
+            logging.info("🐢 Sequential mode ON")
+            results = []
+            for f in files:
+                result = process_file(f, str(MUSIC_PATH), str(COMBINED_VIDEO_DIR), str(output_folder))
                 logging.info(result)
                 results.append(result)
 
