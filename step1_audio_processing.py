@@ -18,6 +18,7 @@ import soundfile as sf
 import noisereduce as nr
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from contextlib import contextmanager
 
 import logging
 import time
@@ -25,90 +26,37 @@ import time
 # ─── Timer Start ───────────────────────────────────────────────
 start_time = time.perf_counter()
 
-# ─── Configuration ─────────────────────────────────────────────────────
-# BASE_DIR = Path(r"G:\My Drive\Data_Science\Resulam\Phrasebook_Audio_Video_Processing_production")
+# ─── Asset Source Config ──────────────────────────────
+# USE_PRIVATE_ASSETS = True   # switch here: True → private_assets, False → normal assets
+# USE_PRIVATE_ASSETS = False   # switch here: True → private_assets, False → normal assets
+
 BASE_DIR = Path(os.getcwd())
 
-local_language = 'duala'
-silence_threshold = 1.5
-silence_padding_duration = 3
-trailing_silence_duration = 1
-repeat_local_audio = 1
-flag_pad = True
-local_language_title = local_language.title()
-test_or_production = "test"
-test_or_production = "production"
+
+# Check if env variable exists, otherwise set default
+if "USE_PRIVATE_ASSETS" in os.environ:
+    USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
+    print("using Private Assets from env variable")
+else:
+    print(" Private Assets not found from the env variable")
+    # Local default when not provided by runner
+    USE_PRIVATE_ASSETS = True   # change default if needed
+
+print(f"[Config] USE_PRIVATE_ASSETS = {USE_PRIVATE_ASSETS}")
 
 
-# ─── Filtering Configuration ──────────────────────────────────────────────
-# Set USE_FILTERING to False to process all files as before.
-USE_FILTERING = True
+#####################################################
+# FUNCTIONS DEFINITION
+#####################################################
+# ─── Asset Source Config ──────────────────────────────
 
-# Option 1: Filter by a range of sentence numbers.
-# If both sentence and chapter ranges are set, 
-# the sentence range will be used.
-FILTER_SENTENCE_START = 1622
-FILTER_SENTENCE_END   = 1624
-
-FILTER_SENTENCE_START = None
-FILTER_SENTENCE_END   = None
-
-# Option 2: Filter by a range of chapter numbers.
-# FILTER_CHAPTER_START = 1
-# FILTER_CHAPTER_END   = 3
-FILTER_CHAPTER_START = None
-FILTER_CHAPTER_END   = None 
-
-# Global Silent Segments
-trailing_silence = AudioSegment.silent(duration=2000)
-
-# ─── Chapter Ranges ─────────────────────────────────────────────────────
-chapter_ranges = [
-    (1, 173, "Chap1"), (174, 240, "Chap2"), (241, 258, "Chap3"), (259, 407, "Chap4"),
-    (408, 543, "Chap5"), (544, 568, "Chap6"), (569, 703, "Chap7"), (704, 788, "Chap8"),
-    (789, 930, "Chap9"), (931, 991, "Chap10"), (992, 1011, "Chap11"), (1012, 1036, "Chap12"),
-    (1037, 1074, "Chap13"), (1075, 1104, "Chap14"), (1105, 1125, "Chap15"), (1126, 1152, "Chap16"),
-    (1153, 1195, "Chap17"), (1196, 1218, "Chap18"), (1219, 1248, "Chap19"), (1249, 1279, "Chap20"),
-    (1280, 1303, "Chap21"), (1304, 1366, "Chap22"), (1367, 1407, "Chap23"), (1408, 1471, "Chap24"),
-    (1472, 1500, "Chap25"), (1501, 1569, "Chap26"), (1570, 1650, "Chap27"), (1651, 1717, "Chap28"),
-    (1718, 1947, "Chap29"), (1948, 1964, "Chap30"), (1965, 1999, "Chap31"), (2000, 2044, "Chap32")
-]
-
-Chapters_begining = [start for start, _, _ in chapter_ranges]
-Chapters_ending = [end for _, end, _ in chapter_ranges]
-Chapters_begining_extended = sorted(Chapters_begining + [i + 1 for i in Chapters_begining])
-
-# ─── Path Setup ─────────────────────────────────────────────────────────
-def get_nth_parent_directory(path: Path, n: int) -> Path:
-    for _ in range(n):
-        path = path.parent
-    return path
-
-local_lang_audio_dir_name = f"{local_language_title}Only" if test_or_production == "production" else f"{local_language_title}OnlyTest"
-local_language_dir = (BASE_DIR /"assets"/ "Languages" / f"{local_language_title}Phrasebook" / local_lang_audio_dir_name).resolve()
-local_audio_path = local_language_dir
-eng_audio_path = BASE_DIR/"assets" / "EnglishOnly"
-print("Starting audio directory setup...")
-
-
-# ── LOGGING CONFIG ──────────────────────────────────────────────────────
-assets_dir = BASE_DIR / "assets"
-log_dir = assets_dir / "Languages" / f"{local_language_title}Phrasebook"/"Logs"
-log_dir.mkdir(parents=True, exist_ok=True)
-
-# Use the script name but place it inside the Phrasebook folder
-log_file = log_dir / Path(__file__).with_suffix(".log").name
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%H:%M:%S",
-    handlers=[
-        logging.FileHandler(log_file, mode="w", encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-)
-
+def get_asset_path(relative_path: str) -> Path:
+    """
+    Resolve a path inside either 'assets' or 'private_assets'
+    depending on USE_PRIVATE_ASSETS flag.
+    """
+    base = BASE_DIR / ("private_assets" if USE_PRIVATE_ASSETS else "assets")
+    return base / relative_path
 
 # ─── Subdirectory Check ─────────────────────────────────────────────────
 def check_subdirectories(directory: Path) -> list:
@@ -353,7 +301,7 @@ def merge_bilingual_audio(eng_audio_dir: Path,
             processed += 1
 
             # ✅ Show progress on screen for processed files
-            logging.info(f"[{idx}/{total}] ✅ Created {output_name}")
+            # logging.info(f"[{idx}/{total}] ✅ Created {output_name}")
 
         except Exception as e:
             failed += 1
@@ -522,7 +470,7 @@ def batch_process_mp3s(
     apply_silence: bool = True,
     soft_mute: bool = True,
     preset: str = "medium"
-) -> None:
+    ) -> None:
     """
     Normalize and process MP3 files.
     Skips already normalized files quickly using a precomputed set.
@@ -643,180 +591,12 @@ def copy_and_rename(src_file: Path) -> Path | None:
         print(f"❌ Error copying {src_file}: {e}")
         return None
 
-def timed_step(step_name, func, *args, **kwargs):
-    """
-    Helper to log execution time for each step.
-    """
-    logging.info(f"▶️ Starting {step_name}...")
-    start = time.perf_counter()
-    result = func(*args, **kwargs)
-    elapsed = time.perf_counter() - start
-    logging.info(f"⏱️ {step_name} completed in {elapsed:.2f} seconds")
-    return result
-
 
 def is_new_file_better(temp_path, existing_path):
     from pydub.utils import mediainfo
     new_dur = float(mediainfo(str(temp_path))["duration"])
     old_dur = float(mediainfo(str(existing_path))["duration"])
     return new_dur > old_dur
-
-#####################################################
-# END FUNCTIONS
-#####################################################
-
-# ─── Global Timer ─────────────────────────────────────────────
-global_start = time.perf_counter()
-
-# ──────────────── SELECT WORKING SET ───────────────
-prefix = f"{local_language.lower()}_phrasebook_"
-subset_files_now = []
-
-if USE_FILTERING:
-    # 1) Ensure raw subdirectories are moved into original_audios
-    original_dir = local_audio_path / "original_audios"
-    os.makedirs(original_dir, exist_ok=True)
-
-    generated_folders = {
-        "original_audios",
-        "gen1_normalized",
-        "gen2_normalized_padded",
-        "gen3_bilingual_sentences",
-        "bilingual_sentences_chapters",
-    }
-
-    for item in local_audio_path.iterdir():
-        print(item)
-        if item.is_dir() and item.name not in generated_folders:
-            try:
-                shutil.move(str(item), original_dir / item.name)
-                print(f"📂 Moved {item.name} → {original_dir}")
-            except Exception as e:
-                print(f"❌ Error moving folder '{item}': {e}")
-
-   
-    # 2) Gather all files recursively inside original_audios
-    # all_audio_files, _ = get_audio(original_dir, check_subfolders=True)
-
-    all_audio_files, _ = timed_step(
-        "Step 3 (Gather Files)",
-        get_audio, original_dir, check_subfolders=True
-    )
-    
-    # 3) Apply filter
-    # source_files_to_process = apply_processing_filter(all_audio_files, chapter_ranges)
-    
-    source_files_to_process = timed_step(
-        "Step 4 (Apply Filter)",
-        apply_processing_filter, all_audio_files, chapter_ranges
-    )
-     
-    if not source_files_to_process:
-        print("❌ No files to process after filtering. Exiting.")
-        raise SystemExit
-
-    # 4) Parallel copy + rename back to parent
-    def parallel_copy():
-        subset = []
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(copy_and_rename, Path(f)) for f in source_files_to_process]
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    subset.append(result)
-        return subset
-
-    subset_files_now = timed_step("Step 5 (Copy + Rename)", parallel_copy)
-
-    working_input_dir = local_audio_path
-
-else:
-    # Legacy mode: extract and rename everything
-    subdirs = check_subdirectories(local_audio_path)
-    if subdirs:
-        try:
-            _ = extract_audios_and_move_original(local_audio_path)
-        except Exception as e:
-            print(f"❌ Error extracting audios: {e}")
-
-    files_rename(local_audio_path,
-                 prefix=prefix, suffix="",
-                 replace="", by="",
-                 remove_first=0, remove_last=0,
-                 lower_all=True, upper_all=False,
-                 extensions=(".mp3", ".wav"))
-
-    subset_files_now, _ = get_audio(local_audio_path)
-    working_input_dir = local_audio_path
-
-# ─────────────── NORMALIZE AUDIO (ONLY THE SUBSET) ──────────────────────
-# normalized_audio_path = working_input_dir / "gen1_normalized"
-normalized_audio_path = BASE_DIR /"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen1_normalized"
-normalized_audio_path.mkdir(parents=True, exist_ok=True)
-
-# batch_process_mp3s(
-#     input_folder=str(working_input_dir),
-#     output_folder=str(normalized_audio_path),
-#     files_to_process=subset_files_now,   # << only process subset
-#     silence_noise_db=-32.0,
-#     silence_min_dur=0.22,
-#     edge_guard_ms=80,
-#     apply_silence=False,
-#     preset="medium"
-# )
-
-timed_step(
-    f"Step 6 (Normalize {len(subset_files_now)} files)",
-    batch_process_mp3s,
-    input_folder=str(working_input_dir),
-    output_folder=str(normalized_audio_path),
-    files_to_process=subset_files_now,
-    silence_noise_db=-32.0,
-    silence_min_dur=0.22,
-    edge_guard_ms=80,
-    apply_silence=False,
-    preset="medium"
-)
-
-# ─────────────── PAD NORMALIZED AUDIO ───────────────────────────────────
-normalized_files_to_process = [normalized_audio_path / f.name for f in subset_files_now]
-# normalized_padded_path = working_input_dir / "gen2_normalized_padded"
-normalized_padded_path = BASE_DIR/"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen2_normalized_padded"
-normalized_padded_path.mkdir(parents=True, exist_ok=True)
-
-# export_padded_audios(normalized_files_to_process, out_dir=normalized_padded_path)
-
-timed_step(
-    f"Step 7 (Pad {len(normalized_files_to_process)} files)",
-    export_padded_audios,
-    normalized_files_to_process,
-    out_dir=normalized_padded_path
-)
-# ──────────────  BILINGUAL AUDIO PRODUCTION (SUBSET ONLY) ───────────────
-Trailing_silent = AudioSegment.silent(duration=1000)
-Inside_silent   = AudioSegment.silent(duration=3000)
-# bilingual_output_path = working_input_dir / "gen3_bilingual_sentences"
-bilingual_output_path = BASE_DIR /"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen3_bilingual_sentences"
-bilingual_output_path.mkdir(parents=True, exist_ok=True)
-
-# Pass subset IDs directly so only filtered files are processed
-target_ids = {get_digits_numbers_from_string(f.name) for f in subset_files_now}
-
-# merge_bilingual_audio(
-#     eng_audio_path,
-#     normalized_padded_path,
-#     bilingual_output_path,
-#     target_ids=target_ids
-# )
-
-timed_step(
-    f"Step 8 (Merge bilingual, {len(target_ids)} IDs)",
-    merge_bilingual_audio,
-    eng_audio_path,
-    normalized_padded_path,
-    bilingual_output_path,
-    target_ids=target_ids
-)
 
 def reduce_noise_from_audio(input_file, output_file):
     """
@@ -847,6 +627,283 @@ def reduce_noise_from_audio(input_file, output_file):
         print(f"Error: The file {input_file} was not found.")
     except Exception as e:
         print(f"An error occurred: {e}")
+
+def format_elapsed(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.2f} sec"
+    elif seconds < 3600:
+        return f"{seconds/60:.2f} min"
+    elif seconds < 86400:
+        return f"{seconds/3600:.2f} hr"
+    else:
+        return f"{seconds/86400:.2f} days"
+
+
+@contextmanager
+def log_time(step_name: str):
+    start = time.perf_counter()
+    logging.info(f"▶️ Starting {step_name}…")
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - start
+        logging.info(f"⏱ Finished {step_name} in {format_elapsed(elapsed)}")
+
+#####################################################
+# END FUNCTIONS
+#####################################################
+
+if USE_PRIVATE_ASSETS:
+    print("Using PRIVATE ASSETS ...")
+else:
+    print("Using Public assets ...")
+# BASE_DIR = Path(r"G:\My Drive\Data_Science\Resulam\Phrasebook_Audio_Video_Processing_production")
+
+local_language = 'duala'
+silence_threshold = 1.5
+silence_padding_duration = 3
+trailing_silence_duration = 1
+repeat_local_audio = 1
+flag_pad = True
+local_language_title = local_language.title()
+test_or_production = "test"
+test_or_production = "production"
+
+# Option 1: Filter by a range of sentence numbers.
+# If both sentence and chapter ranges are set, 
+# the sentence range will be used.
+FILTER_SENTENCE_START = 1622
+FILTER_SENTENCE_END   = 1624
+
+FILTER_SENTENCE_START = None
+FILTER_SENTENCE_END   = None
+
+# Option 2: Filter by a range of chapter numbers.
+# FILTER_CHAPTER_START = 1
+# FILTER_CHAPTER_END   = 3
+FILTER_CHAPTER_START = None
+FILTER_CHAPTER_END   = None 
+
+# Global Silent Segments
+trailing_silence = AudioSegment.silent(duration=2000)
+
+# ─── Chapter Ranges ─────────────────────────────────────────────────────
+chapter_ranges = [
+    (1, 173, "Chap1"), (174, 240, "Chap2"), (241, 258, "Chap3"), (259, 407, "Chap4"),
+    (408, 543, "Chap5"), (544, 568, "Chap6"), (569, 703, "Chap7"), (704, 788, "Chap8"),
+    (789, 930, "Chap9"), (931, 991, "Chap10"), (992, 1011, "Chap11"), (1012, 1036, "Chap12"),
+    (1037, 1074, "Chap13"), (1075, 1104, "Chap14"), (1105, 1125, "Chap15"), (1126, 1152, "Chap16"),
+    (1153, 1195, "Chap17"), (1196, 1218, "Chap18"), (1219, 1248, "Chap19"), (1249, 1279, "Chap20"),
+    (1280, 1303, "Chap21"), (1304, 1366, "Chap22"), (1367, 1407, "Chap23"), (1408, 1471, "Chap24"),
+    (1472, 1500, "Chap25"), (1501, 1569, "Chap26"), (1570, 1650, "Chap27"), (1651, 1717, "Chap28"),
+    (1718, 1947, "Chap29"), (1948, 1964, "Chap30"), (1965, 1999, "Chap31"), (2000, 2044, "Chap32")
+]
+
+Chapters_begining = [start for start, _, _ in chapter_ranges]
+Chapters_ending = [end for _, end, _ in chapter_ranges]
+Chapters_begining_extended = sorted(Chapters_begining + [i + 1 for i in Chapters_begining])
+
+# ── DIRECTORIES AND PATHS SETUP ──────────────────────────────────────────────────────
+
+# ── DIRECTORIES AND PATHS SETUP ──────────────────────────────────────────────────────
+local_lang_audio_dir_name = (
+    f"{local_language_title}Only"
+    if test_or_production == "production"
+    else f"{local_language_title}OnlyTest"
+)
+
+local_language_dir = get_asset_path(f"Languages/{local_language_title}Phrasebook/{local_lang_audio_dir_name}").resolve()
+local_audio_path = local_language_dir
+
+# English audios (for bilingual merging later)
+# eng_audio_path = BASE_DIR/"assets" / "EnglishOnly"
+eng_audio_path = get_asset_path("EnglishOnly")
+
+# assets_dir = BASE_DIR / "assets"
+assets_dir = get_asset_path("")
+log_dir = get_asset_path(f"Languages/{local_language_title}Phrasebook/Logs")
+log_dir.mkdir(parents=True, exist_ok=True)
+# Use the script name but place it inside the Phrasebook folder
+log_file = log_dir / Path(__file__).with_suffix(".log").name
+
+# normalized_audio_path = BASE_DIR /"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen1_normalized"
+normalized_audio_path = get_asset_path(
+    f"Languages/{local_language_title}Phrasebook/Results_Audios/gen1_normalized"
+)
+
+
+# normalized_padded_path = BASE_DIR/"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen2_normalized_padded"
+normalized_padded_path = get_asset_path(
+    f"Languages/{local_language_title}Phrasebook/Results_Audios/gen2_normalized_padded"
+)
+
+# bilingual_output_path = working_input_dir / "gen3_bilingual_sentences"
+# bilingual_output_path = BASE_DIR / "assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen3_bilingual_sentences"
+
+bilingual_output_path = get_asset_path(
+    f"Languages/{local_language_title}Phrasebook/Results_Audios/gen3_bilingual_sentences"
+)
+
+
+# ─── Logging Setup ──────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[
+        logging.FileHandler(log_file, mode="w", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+
+
+# ─── Global Timer ─────────────────────────────────────────────
+global_start = time.perf_counter()
+
+# ──────────────── SELECT WORKING SET ───────────────
+# ─── Filtering Configuration ──────────────────────────────────────────────
+# Set USE_FILTERING to False to process all files as before.
+USE_FILTERING = True
+
+prefix = f"{local_language.lower()}_phrasebook_"
+subset_files_now = []
+
+if USE_FILTERING:
+    # 1) Ensure raw subdirectories are moved into original_audios
+    original_dir = local_audio_path / "original_audios"
+    os.makedirs(original_dir, exist_ok=True)
+
+    generated_folders = {
+        "original_audios",
+        "gen1_normalized",
+        "gen2_normalized_padded",
+        "gen3_bilingual_sentences",
+        "bilingual_sentences_chapters",
+    }
+
+    for item in local_audio_path.iterdir():
+        print(item)
+        if item.is_dir() and item.name not in generated_folders:
+            try:
+                shutil.move(str(item), original_dir / item.name)
+                print(f"📂 Moved {item.name} → {original_dir}")
+            except Exception as e:
+                print(f"❌ Error moving folder '{item}': {e}")
+
+   
+    # 2) Gather all files recursively inside original_audios
+    # all_audio_files, _ = get_audio(original_dir, check_subfolders=True)
+    
+    with log_time("Step 3 (Gather Files)"):
+        all_audio_files, _ = get_audio(original_dir, check_subfolders=True)
+
+    # 3) Apply filter
+    # source_files_to_process = apply_processing_filter(all_audio_files, chapter_ranges)
+    
+     
+    with log_time("Step 4 (Apply Filter)"):
+        source_files_to_process = apply_processing_filter(all_audio_files, chapter_ranges)
+
+         
+    if not source_files_to_process:
+        print("❌ No files to process after filtering. Exiting.")
+        raise SystemExit
+
+    # 4) Parallel copy + rename back to parent
+    def parallel_copy():
+        subset = []
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(copy_and_rename, Path(f)) for f in source_files_to_process]
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    subset.append(result)
+        return subset
+
+    with log_time("Step 5 (Copy + Rename)"):
+        subset_files_now = parallel_copy()
+        
+
+    working_input_dir = local_audio_path
+
+else:
+    # Legacy mode: extract and rename everything
+    subdirs = check_subdirectories(local_audio_path)
+    if subdirs:
+        try:
+            _ = extract_audios_and_move_original(local_audio_path)
+        except Exception as e:
+            print(f"❌ Error extracting audios: {e}")
+
+    files_rename(local_audio_path,
+                 prefix=prefix, suffix="",
+                 replace="", by="",
+                 remove_first=0, remove_last=0,
+                 lower_all=True, upper_all=False,
+                 extensions=(".mp3", ".wav"))
+
+    subset_files_now, _ = get_audio(local_audio_path)
+    working_input_dir = local_audio_path
+
+# ─────────────── NORMALIZE AUDIO (ONLY THE SUBSET) ──────────────────────
+
+# batch_process_mp3s(
+#     input_folder=str(working_input_dir),
+#     output_folder=str(normalized_audio_path),
+#     files_to_process=subset_files_now,   # << only process subset
+#     silence_noise_db=-32.0,
+#     silence_min_dur=0.22,
+#     edge_guard_ms=80,
+#     apply_silence=False,
+#     preset="medium"
+# )
+
+with log_time(f"Step 6 (Normalize {len(subset_files_now)} files)"):
+    batch_process_mp3s(
+        input_folder=str(working_input_dir),
+        output_folder=str(normalized_audio_path),
+        files_to_process=subset_files_now,
+        silence_noise_db=-32.0,
+        silence_min_dur=0.22,
+        edge_guard_ms=80,
+        apply_silence=False,
+        preset="medium"
+    )
+
+
+# ─────────────── PAD NORMALIZED AUDIO ───────────────────────────────────
+normalized_files_to_process = [normalized_audio_path / f.name for f in subset_files_now]
+
+# export_padded_audios(normalized_files_to_process, out_dir=normalized_padded_path)
+
+
+with log_time(f"Step 7 (Pad {len(normalized_files_to_process)} files)"):
+    export_padded_audios(normalized_files_to_process, out_dir=normalized_padded_path)
+
+# ──────────────  BILINGUAL AUDIO PRODUCTION (SUBSET ONLY) ───────────────
+Trailing_silent = AudioSegment.silent(duration=1000)
+Inside_silent   = AudioSegment.silent(duration=3000)
+
+
+# Pass subset IDs directly so only filtered files are processed
+target_ids = {get_digits_numbers_from_string(f.name) for f in subset_files_now}
+
+# merge_bilingual_audio(
+#     eng_audio_path,
+#     normalized_padded_path,
+#     bilingual_output_path,
+#     target_ids=target_ids
+# )
+
+
+with log_time(f"Step 8 (Merge bilingual, {len(target_ids)} IDs)"):
+    merge_bilingual_audio(
+        eng_audio_path,
+        normalized_padded_path,
+        bilingual_output_path,
+        target_ids=target_ids
+    )
+
 
 # ──────────────  NOISE REDUCTION (on bilingual output) ───────────────
 # This will overwrite existing files instead of creating denoised_ copies
@@ -933,6 +990,9 @@ if song and previous_chapter:
         print(f"✅ Exported {output_path.name}")
 
 # ─── Timer End ─────────────────────────────────────────────────
+
+
 end_time = time.perf_counter()
 elapsed = end_time - start_time
-logging.info(f"Script completed in {elapsed:.2f} seconds.")
+logging.info(f"Script completed in {format_elapsed(elapsed)}")
+

@@ -39,8 +39,6 @@ MODE      = "lecture"       # "lecture" or "homework"
 
 BASE_DIR = Path(os.getcwd())
 
-
-
 FPS       = 24
 FFMPEG_THREADS_PER_JOB = 4
 SHUFFLE_SEED = None
@@ -58,29 +56,60 @@ EXCLUDED_SENTENCES = {
     1646,1647,1762,1763,2010
 }
 
+
+# ─── Asset Source Config ──────────────────────────────────────────────
+# USE_PRIVATE_ASSETS = True   # True → private_assets, False → normal assets
+
+
+# Check if env variable exists, otherwise set default
+if "USE_PRIVATE_ASSETS" in os.environ:
+    USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
+    print("using Private Assets from env variable")
+else:
+    print(" Private Assets not found from the env variable")
+    # Local default when not provided by runner
+    USE_PRIVATE_ASSETS = True   # change default if needed
+
+
+def get_asset_path(relative_path: str) -> Path:
+    base = BASE_DIR / ("private_assets" if USE_PRIVATE_ASSETS else "assets")
+    return base / relative_path
+
+
+
 # ── FOLDER LAYOUT ──────────────────────────────────────────────────────
 
 MODE = "lecture"            # "lecture" or "homework"
 # MODE = "homework"            # "lecture" or "homework"
-VIDEO_DIR  = BASE_DIR / "Python_Scripts_Resulam_Phrasebooks_Audio_Processing"
+# VIDEO_DIR  = BASE_DIR / "Python_Scripts_Resulam_Phrasebooks_Audio_Processing"
 
-assets_dir = BASE_DIR / "assets"
+# assets_dir = BASE_DIR / "assets"
 
 # Output directory (always created)
-VIDEO_DIR = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook" / "Results_Videos" / f"{MODE.title()}"
+# VIDEO_DIR = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook" / "Results_Videos" / f"{MODE.title()}"
+VIDEO_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Results_Videos/{MODE.title()}")
 
 VIDEO_PATTERN = "{lang_lower}_sentence_{id}.mp4"
 OUTPUT_DIR = VIDEO_DIR / f"{LANGUAGE.title()}_Chapters_Combined"
+
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ── LOGGING CONFIG ──────────────────────────────────────────────────────
-assets_dir = BASE_DIR / "assets"
-log_dir = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook"/"Logs"
-log_dir.mkdir(parents=True, exist_ok=True)
+# assets_dir = BASE_DIR / "assets"
+# LOG_DIR = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook"/"Logs"
+# LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+LOG_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+SENTENCES_PATH = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/{LANGUAGE.lower()}_english_french_phrasebook_sentences_list.txt")
+
+
 
 # Use the script name but place it inside the Phrasebook folder
-log_file = log_dir / Path(__file__).with_suffix(".log").name
+log_file = LOG_DIR / Path(__file__).with_suffix(".log").name
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,16 +144,16 @@ def log_time(step_name: str):
 
         
 # ── HELPERS ────────────────────────────────────────────────────────────
-def build_paths() -> Dict[str, Path]:
-    lang_lower = LANGUAGE.lower()
-    out_dir = VIDEO_DIR 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    phrase_book_list = BASE_DIR/ "assets" / f"Languages/{LANGUAGE.title()}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt"
-    if not out_dir.exists():
-        raise FileNotFoundError(f"Sentence-video folder not found: {out_dir}")
-    if not phrase_book_list.exists():
-        raise FileNotFoundError(f"Cannot locate sentence list: {phrase_book_list}")
-    return {"lang_lower": lang_lower, "out_dir": out_dir, "sentences_txt": phrase_book_list}
+# def build_paths() -> Dict[str, Path]:
+#     lang_lower = LANGUAGE.lower()
+#     out_dir = VIDEO_DIR 
+#     out_dir.mkdir(parents=True, exist_ok=True)
+#     phrase_book_list = BASE_DIR/ "assets" / f"Languages/{LANGUAGE.title()}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt"
+#     if not out_dir.exists():
+#         raise FileNotFoundError(f"Sentence-video folder not found: {out_dir}")
+#     if not phrase_book_list.exists():
+#         raise FileNotFoundError(f"Cannot locate sentence list: {phrase_book_list}")
+#     return {"lang_lower": lang_lower, "out_dir": out_dir, "sentences_txt": phrase_book_list}
 
 def parse_chapters(txt_file: Path) -> Dict[int, List[int]]:
     """Return {chapter_number: [sentence_id,…]} preserving original order."""
@@ -148,8 +177,9 @@ def parse_chapters(txt_file: Path) -> Dict[int, List[int]]:
             chapters.setdefault(current, []).append(sid)
     return chapters
 
-def gather_clips(sentence_ids: Iterable[int], lang_lower: str, out_dir: Path) -> List[Path]:
-    paths = [out_dir / VIDEO_PATTERN.format(lang_lower=lang_lower, id=sid) for sid in sentence_ids]
+
+def gather_clips(sentence_ids: Iterable[int]) -> List[Path]:
+    paths = [VIDEO_DIR / VIDEO_PATTERN.format(lang_lower=LANGUAGE.lower(), id=sid) for sid in sentence_ids]
     return [p for p in paths if p.exists()]
 
 def _open_clip(path: Path):
@@ -164,7 +194,7 @@ def chunk(lst: List[Path], size: int) -> Iterable[List[Path]]:
     for i in range(0, len(lst), size):
         yield lst[i:i + size]
 
-def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path], lang_lower: str) -> None:
+def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path]) -> None:
     if not clip_paths:
         return
     clips = []
@@ -179,7 +209,7 @@ def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path], lang_lowe
     print(f"▶ Chapter {chap_idx} chunk {chunk_idx:02d}: concatenating {len(clips)} clips …")
     final = concatenate_videoclips(clips, method="compose")
 
-    out_file = OUTPUT_DIR / f"{lang_lower}_chapter_{chap_idx}_chunk_{chunk_idx:02d}.mp4"
+    out_file = OUTPUT_DIR / f"{LANGUAGE.lower()}_chapter_{chap_idx}_chunk_{chunk_idx:02d}.mp4"
     tmp_file = out_file.with_suffix(".tmp.mp4")
 
     try:
@@ -203,8 +233,10 @@ def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path], lang_lowe
 def main() -> None:
     random.seed(SHUFFLE_SEED)
 
-    paths = build_paths()
-    chapter_map = parse_chapters(paths["sentences_txt"])
+    # paths = build_paths()
+    # chapter_map = parse_chapters(paths["sentences_txt"])
+    chapter_map = parse_chapters(SENTENCES_PATH)
+
     if not chapter_map:
         print("⚠ No chapters detected – nothing to do.")
         return
@@ -230,7 +262,9 @@ def main() -> None:
             print(f"⚠ Chapter {chap_num}: all sentences excluded – skipped")
             continue
 
-        clip_paths = gather_clips(sentence_ids, paths["lang_lower"], paths["out_dir"])
+        
+        clip_paths = gather_clips(sentence_ids)
+
         if not clip_paths:
             print(f"⚠ Chapter {chap_num}: no clips found – skipped")
             continue
@@ -239,14 +273,13 @@ def main() -> None:
             random.shuffle(clip_paths)
 
         for chunk_idx, sub in enumerate(chunk(clip_paths, CHUNK_SIZE), start=1):
-            write_chunk(chap_num, chunk_idx, sub, paths["lang_lower"])
+            write_chunk(chap_num, chunk_idx, sub)
 
 def main() -> None:
     random.seed(SHUFFLE_SEED)
 
     with log_time("Chapter Combiner"):
-        paths = build_paths()
-        chapter_map = parse_chapters(paths["sentences_txt"])
+        chapter_map = parse_chapters(SENTENCES_PATH)
         if not chapter_map:
             print("⚠ No chapters detected – nothing to do.")
             return
@@ -273,7 +306,7 @@ def main() -> None:
                     print(f"⚠ Chapter {chap_num}: all sentences excluded – skipped")
                     continue
 
-                clip_paths = gather_clips(sentence_ids, paths["lang_lower"], paths["out_dir"])
+                clip_paths = gather_clips(sentence_ids)
                 if not clip_paths:
                     print(f"⚠ Chapter {chap_num}: no clips found – skipped")
                     continue
@@ -283,7 +316,7 @@ def main() -> None:
 
                 for chunk_idx, sub in enumerate(chunk(clip_paths, CHUNK_SIZE), start=1):
                     with log_time(f"Chapter {chap_num} chunk {chunk_idx}"):
-                        write_chunk(chap_num, chunk_idx, sub, paths["lang_lower"])
+                        write_chunk(chap_num, chunk_idx, sub)
 
 if __name__ == "__main__":
     main()

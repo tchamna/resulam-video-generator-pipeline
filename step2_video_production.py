@@ -19,6 +19,22 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+
+# # ─── Asset Source Config ──────────────────────────────
+# USE_PRIVATE_ASSETS = True   # switch here: True → private_assets, False → normal assets
+# USE_PRIVATE_ASSETS = False   # switch here: True → private_assets, False → normal assets
+
+BASE_DIR = Path(os.getcwd())
+
+# Check if env variable exists, otherwise set default
+if "USE_PRIVATE_ASSETS" in os.environ:
+    USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
+    print("using Private Assets from env variable")
+else:
+    print(" Private Assets not found from the env variable")
+    # Local default when not provided by runner
+    USE_PRIVATE_ASSETS = True   # change default if needed
+
 # ── USER SETTINGS ───────────────────────────────────────────────────────
 LANGUAGE = "Duala"          # e.g., "Nufi", "Yoruba", "Duala"
 MODE = "lecture"            # "lecture" or "homework"
@@ -35,10 +51,40 @@ while FFMPEG_THREADS > AVAILABLE_CPUS:
     FFMPEG_THREADS = max(1, FFMPEG_THREADS // 2)
 MAX_PARALLEL_JOBS = min(MAX_PARALLEL_JOBS, AVAILABLE_CPUS // FFMPEG_THREADS)
 
+
+
+def get_asset_path(relative_path: str) -> Path:
+    """
+    Resolve a path inside either 'assets' or 'private_assets'
+    depending on USE_PRIVATE_ASSETS flag.
+    """
+    base = BASE_DIR / ("private_assets" if USE_PRIVATE_ASSETS else "assets")
+    return base / relative_path
+
+
 # ── PATHS SETUP ─────────────────────────────────────────────────────
-BASE_DIR = Path(os.getcwd())
-FONT_PATH = BASE_DIR / "assets"/ "Fonts" / "arialbd.ttf"
-LOGO_PATH = BASE_DIR/ "assets" / "resulam_logo_resurrectionLangue.png"
+# FONT_PATH = BASE_DIR / "assets"/ "Fonts" / "arialbd.ttf"
+# LOGO_PATH = BASE_DIR/ "assets" / "resulam_logo_resurrectionLangue.png"
+
+FONT_PATH = get_asset_path("Fonts/arialbd.ttf")
+LOGO_PATH = get_asset_path("resulam_logo_resurrectionLangue.png")
+
+# assets_dir = BASE_DIR / "assets"
+# LOG_DIR = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook"/"Logs"
+
+LOG_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+MODE_FOLDER = "Lecture" if MODE.lower() == "lecture" else "Homework"
+VIDEO_OUT_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Results_Videos/{MODE_FOLDER}")
+VIDEO_OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+BACKGROUND_DIR = get_asset_path(f"Backgrounds_Selected/{LANGUAGE.title()}")
+LOCAL_AUDIO_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Results_Audios/gen2_normalized_padded")
+ENG_AUDIO_DIR = get_asset_path("EnglishOnly")
+ # english_audio_path = BASE_DIR/"assets"/"EnglishOnly" / sentence["english_audio"]
+   
+SENTENCES_PATH = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/{LANGUAGE.lower()}_english_french_phrasebook_sentences_list.txt")
 
 # ── FONTS SETUP ─────────────────────────────────────────────────────
 
@@ -63,14 +109,10 @@ INTRO_MESSAGES = {
 DEFAULT_INTRO = "Listen, repeat and translate:"
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-
 # ── LOGGING CONFIG ──────────────────────────────────────────────────────
-assets_dir = BASE_DIR / "assets"
-log_dir = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook"/"Logs"
-log_dir.mkdir(parents=True, exist_ok=True)
 
 # Use the script name but place it inside the Phrasebook folder
-log_file = log_dir / Path(__file__).with_suffix(".log").name
+log_file = LOG_DIR / Path(__file__).with_suffix(".log").name
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,55 +125,30 @@ logging.basicConfig(
 )
 
 
+def format_elapsed(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.2f} sec"
+    elif seconds < 3600:
+        return f"{seconds/60:.2f} min"
+    elif seconds < 86400:
+        return f"{seconds/3600:.2f} hr"
+    else:
+        return f"{seconds/86400:.2f} days"
 
 @contextmanager
 def log_time(step_name: str):
-    """Context manager to log execution time of a code block."""
     start = time.perf_counter()
-    logging.info(f"▶️ Starting {step_name}...")
+    logging.info(f"▶️ Starting {step_name}…")
     try:
         yield
     finally:
         elapsed = time.perf_counter() - start
-        logging.info(f"⏱ Finished {step_name} in {elapsed:.2f} sec")
+        logging.info(f"⏱ Finished {step_name} in {format_elapsed(elapsed)}")
 
+        
 # ── PATH SETUP ──────────────────────────────────────────────────────────
 # language = LANGUAGE
 # mode = MODE
-
-
-
-
-def get_project_paths(language: str, mode: str):
-    
-    local_language_title = language.title()
-    language_lower = language.lower()
-    mode_folder = "Lecture" if mode.lower() == "lecture" else "Homework"
-
-    assets_dir = BASE_DIR / "assets"
-
-    # Output directory (always created)
-    output_dir = assets_dir / "Languages" / f"{local_language_title}Phrasebook" / "Results_Videos" / mode_folder
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Backgrounds: fallback to "Default" if language folder doesn't exist
-    background_dir = assets_dir / "Backgrounds_Selected" / local_language_title
-    if not background_dir.exists():
-        background_dir = background_dir.parent / "Default"
-    # Local audio: depends on PROJECT_MODE
-    suffix = "OnlyTest" if PROJECT_MODE.lower() == "test" else "Only"
-    # local_audio_dir = assets_dir / "Languages" / f"{local_language_title}Phrasebook" / f"{local_language_title}{suffix}" / "gen2_normalized_padded"
-    local_audio_dir = BASE_DIR /"assets" / "Languages" / f"{local_language_title}Phrasebook" / "Results_Audios" / "gen2_normalized_padded"
-
-    return {
-        "language": local_language_title,
-        "lang_lower": language_lower,
-        "background_dir": background_dir,
-        "local_audio_dir": local_audio_dir,
-        "english_audio_dir": BASE_DIR / "EnglishOnly",
-        "output_dir": output_dir,
-        "sentence_file": assets_dir / "Languages" / f"{local_language_title}Phrasebook" / f"{language_lower}_english_french_phrasebook_sentences_list.txt",
-    }
 
 # ── PARSE SENTENCE FILE ─────────────────────────────────────────────────
 def load_sentences(txt_file: Path, lang_code: str) -> List[Dict]:
@@ -212,7 +229,7 @@ def calculate_font_size(sentence: Dict) -> int:
 
 # ── BUILD SINGLE VIDEO ──────────────────────────────────────────────────
 
-def create_video_clip(sentence: Dict, paths: Dict, mode: str):
+def create_video_clip(sentence: Dict):
     """
     Build a single video clip for one sentence.
     Shows correct sentence ID in header and captions (source, english, french).
@@ -220,13 +237,17 @@ def create_video_clip(sentence: Dict, paths: Dict, mode: str):
 
     print(f"▶ Creating video for sentence ID {sentence['id']}")
 
-    output_path = paths["output_dir"] / f"{paths['lang_lower']}_sentence_{sentence['id']}.mp4"
+    output_path = VIDEO_OUT_DIR / f"{LANGUAGE.lower()}_sentence_{sentence['id']}.mp4"
+    
+    
     if output_path.exists() and not REBUILD_ALL:
         print(f"✔ Skipped (already exists): {output_path.name}")
         return
 
-    local_audio_path = paths["local_audio_dir"] / sentence["local_audio"]
-    english_audio_path = BASE_DIR/"assets"/"EnglishOnly" / sentence["english_audio"]
+    # english_audio_path = BASE_DIR/"assets"/"EnglishOnly" / sentence["english_audio"]
+    local_audio_path = LOCAL_AUDIO_DIR / sentence["local_audio"]
+    english_audio_path = ENG_AUDIO_DIR / sentence["english_audio"]
+
 
     if not local_audio_path.exists() or not english_audio_path.exists():
         print(f"⚠ Missing audio for sentence {sentence['id']}")
@@ -236,7 +257,7 @@ def create_video_clip(sentence: Dict, paths: Dict, mode: str):
     english_audio = AudioFileClip(str(english_audio_path))
 
     # --- Audio sequencing ---
-    if mode == "lecture":
+    if MODE == "lecture":
         total_duration = english_audio.duration + REPEAT_PAUSE_SECONDS + local_audio.duration + TRAILING_PAUSE_SECONDS
         audio = CompositeAudioClip([
             english_audio.set_start(0),
@@ -271,7 +292,7 @@ def create_video_clip(sentence: Dict, paths: Dict, mode: str):
 
     # --- Header row ---
     y_header = MARGIN_TOP
-    clips.append(TextClip(paths["language"], font=str(FONT_PATH),
+    clips.append(TextClip(LANGUAGE.title(), font=str(FONT_PATH),
                           fontsize=int(font_size * 0.55), color="yellow", method="label")
                  .set_position((15, y_header)).set_duration(total_duration))
 
@@ -292,12 +313,12 @@ def create_video_clip(sentence: Dict, paths: Dict, mode: str):
 
     # --- Captions ---
     y_text = y_header + int(font_size * HEADER_GAP_RATIO) + 80
-    if mode == "lecture":
+    if MODE == "lecture":
         y_text = add_text(sentence["source"], "white", 0, total_duration, y_text)
         y_text = add_text(sentence["english"], "yellow", 0, total_duration, y_text)
         _ = add_text(sentence["french"], "white", 0, total_duration, y_text)
     else:  # homework mode
-        intro_msg = INTRO_MESSAGES.get(paths["language"], DEFAULT_INTRO)
+        intro_msg = INTRO_MESSAGES.get(LANGUAGE.title(), DEFAULT_INTRO)
 
         # 1. First Nufi playback → intro only
         y_text = add_text(intro_msg, "white", 0, nufi_2_start, y_text)
@@ -337,14 +358,12 @@ def create_video_clip(sentence: Dict, paths: Dict, mode: str):
 # ── MULTI-THREAD RENDERING ──────────────────────────────────────────────
 # chapter_ranges = chapters
 # sentences = tagged_sentences
-# paths = config
+# paths = CONFIG
 # mode = MODE 
 
 def render_all_sentences(
     sentences: List[Dict],
     chapter_ranges: List[tuple],
-    paths: Dict,
-    mode: str,
     *,
     start_chapter: int | None = None,
     end_chapter: int | None = None,
@@ -365,7 +384,7 @@ def render_all_sentences(
 
     def worker(sentence: Dict):
         with semaphore:
-            create_video_clip(sentence, paths, mode)
+            create_video_clip(sentence)
 
     # --- Option A: sentence range ---
     if start_sentence is not None or end_sentence is not None:
@@ -426,7 +445,7 @@ def render_all_sentences(
     for t in threads:
         t.join()
 
-    print(f"✔ Finished rendering Chapters {start_chapter}–{end_chapter} for {paths['language']} [{mode}]")
+    print(f"✔ Finished rendering Chapters {start_chapter}–{end_chapter} for {LANGUAGE.title()} [{MODE}]")
 
 # ── ENTRY POINT ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -437,39 +456,20 @@ if __name__ == "__main__":
     start_sentence, end_sentence=1638, 1638
     start_sentence, end_sentence=None, None
 
-    # config = get_project_paths(LANGUAGE, MODE)
-    # raw_sentences = load_sentences(config["sentence_file"], 
-    #                                config["lang_lower"])
-    # chapters = get_chapter_ranges(raw_sentences)
-    # backgrounds = [resize_background(p) for ext in ("*.png", "*.jpg", "*.jpeg") for p in config["background_dir"].glob(ext)]
-    # tagged_sentences = assign_backgrounds(raw_sentences, backgrounds)
     
-    # render_all_sentences(tagged_sentences, 
-    #                      chapters, 
-    #                      config, 
-    #                      MODE,
-    #                      start_chapter=start_chapter,
-    #                      end_chapter=end_chapter
-    #                      )
-    
-    # if __name__ == "__main__":
-    with log_time("Project Path Setup"):
-        config = get_project_paths(LANGUAGE, MODE)
-
     with log_time("Load Sentences"):
-        raw_sentences = load_sentences(config["sentence_file"], config["lang_lower"])
+        raw_sentences = load_sentences(SENTENCES_PATH, LANGUAGE.lower())
 
     with log_time("Detect Chapters"):
         chapters = get_chapter_ranges(raw_sentences)
 
     with log_time("Prepare Backgrounds"):
         backgrounds = [resize_background(p) for ext in ("*.png", "*.jpg", "*.jpeg")
-                       for p in config["background_dir"].glob(ext)]
+                    for p in BACKGROUND_DIR.glob(ext)]
 
     with log_time("Assign Backgrounds"):
         tagged_sentences = assign_backgrounds(raw_sentences, backgrounds)
 
     with log_time("Render Sentences"):
-        render_all_sentences(tagged_sentences, chapters, config, MODE,
-                             start_chapter=1, end_chapter=32)
-
+        render_all_sentences(tagged_sentences, chapters,
+                            start_chapter=start_chapter, end_chapter=end_chapter)

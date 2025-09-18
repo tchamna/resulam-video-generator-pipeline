@@ -17,6 +17,8 @@ dist/
 build/
 test_moviepy.py
 
+private_assets/
+
 # --- Jupyter & IPython --------------------------------------------
 .ipynb_checkpoints/
 *.ipynb
