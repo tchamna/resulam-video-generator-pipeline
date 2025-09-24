@@ -30,45 +30,48 @@ from moviepy.editor import VideoFileClip, concatenate_videoclips
 import logging
 from contextlib import contextmanager
 
+import step0_config as cfg
+
+
 # from moviepy import VideoFileClip, concatenate_videoclips  # ← for MoviePy 2.x
 
 # ── USER SETTINGS ──────────────────────────────────────────────────────
-LANGUAGE  = "Duala"         # Language
-MODE      = "lecture"       # "lecture" or "homework"
-# BASE_DIR      = Path(r"G:/My Drive/Data_Science/Resulam/Phrasebook_Audio_Video_Processing_production")
 
-BASE_DIR = Path(os.getcwd())
+BASE_DIR = cfg.BASE_DIR
 
-FPS       = 24
-FFMPEG_THREADS_PER_JOB = 4
+USE_PRIVATE_ASSETS = os.getenv(
+    "USE_PRIVATE_ASSETS",
+    "1" if getattr(cfg, "USE_PRIVATE_ASSETS", True) else "0"
+) == "1"
+
+LANGUAGE = cfg.LANGUAGE.title()
+MODE     = cfg.MODE.lower()                      # "lecture" | "homework"
+
+FPS                  = int(getattr(cfg, "FRAME_RATE", 24))
+FFMPEG_THREADS_PER_JOB = int(getattr(cfg, "FFMPEG_THREADS", 2))
 SHUFFLE_SEED = None
-CHUNK_SIZE = 10
+CHUNK_SIZE           = int(getattr(cfg, "CHUNK_SIZE", 10))
 
-# Control which chapters to process
-SINGLE_CHAPTER = None   # e.g., 12 → only Chapter 12
-START_CHAPTER  = 1     # default = 1
-END_CHAPTER    = 32     # None = until last chapter
+# Chapter selection (all optional in cfg)
+SINGLE_CHAPTER = getattr(cfg, "SINGLE_CHAPTER", None)
+START_CHAPTER  = getattr(cfg, "FILTER_CHAPTER_START", 1)
+END_CHAPTER    = getattr(cfg, "FILTER_CHAPTER_END", 32)
 
-# Excluded sentence IDs
-EXCLUDED_SENTENCES = {
-    1476,1477,1478,1479,1480,1481,1482,1483,
-    1590,1607,1610,1614,1616,1621,1628,1629,
-    1646,1647,1762,1763,2010
-}
-
+# Exclusions
+EXCLUDED_SENTENCES = set(getattr(cfg, "EXCLUDED_SENTENCES", set()))
 
 # ─── Asset Source Config ──────────────────────────────────────────────
 # USE_PRIVATE_ASSETS = True   # True → private_assets, False → normal assets
 
 
-# Check if env variable exists, otherwise set default
-if "USE_PRIVATE_ASSETS" in os.environ:
-    USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
-    print("using Private Assets from env variable")
-else:
-    print(" Private Assets not found from the env variable")
-    # Local default when not provided by runner
-    USE_PRIVATE_ASSETS = True   # change default if needed
+# # Check if env variable exists, otherwise set default
+# if "USE_PRIVATE_ASSETS" in os.environ:
+#     USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
+#     print("using Private Assets from env variable")
+# else:
+#     print(" Private Assets not found from the env variable")
+#     # Local default when not provided by runner
+#     USE_PRIVATE_ASSETS = True   # change default if needed
 
 
 def get_asset_path(relative_path: str) -> Path:
@@ -79,11 +82,6 @@ def get_asset_path(relative_path: str) -> Path:
 
 # ── FOLDER LAYOUT ──────────────────────────────────────────────────────
 
-MODE = "lecture"            # "lecture" or "homework"
-# MODE = "homework"            # "lecture" or "homework"
-# VIDEO_DIR  = BASE_DIR / "Python_Scripts_Resulam_Phrasebooks_Audio_Processing"
-
-# assets_dir = BASE_DIR / "assets"
 
 # Output directory (always created)
 # VIDEO_DIR = assets_dir / "Languages" / f"{LANGUAGE.title()}Phrasebook" / "Results_Videos" / f"{MODE.title()}"
@@ -105,8 +103,6 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 SENTENCES_PATH = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/{LANGUAGE.lower()}_english_french_phrasebook_sentences_list.txt")
-
-
 
 # Use the script name but place it inside the Phrasebook folder
 log_file = LOG_DIR / Path(__file__).with_suffix(".log").name
@@ -144,16 +140,6 @@ def log_time(step_name: str):
 
         
 # ── HELPERS ────────────────────────────────────────────────────────────
-# def build_paths() -> Dict[str, Path]:
-#     lang_lower = LANGUAGE.lower()
-#     out_dir = VIDEO_DIR 
-#     out_dir.mkdir(parents=True, exist_ok=True)
-#     phrase_book_list = BASE_DIR/ "assets" / f"Languages/{LANGUAGE.title()}Phrasebook/{lang_lower}_english_french_phrasebook_sentences_list.txt"
-#     if not out_dir.exists():
-#         raise FileNotFoundError(f"Sentence-video folder not found: {out_dir}")
-#     if not phrase_book_list.exists():
-#         raise FileNotFoundError(f"Cannot locate sentence list: {phrase_book_list}")
-#     return {"lang_lower": lang_lower, "out_dir": out_dir, "sentences_txt": phrase_book_list}
 
 def parse_chapters(txt_file: Path) -> Dict[int, List[int]]:
     """Return {chapter_number: [sentence_id,…]} preserving original order."""
@@ -230,50 +216,6 @@ def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path]) -> None:
             c.close()
 
 # ── MAIN ───────────────────────────────────────────────────────────────
-def main() -> None:
-    random.seed(SHUFFLE_SEED)
-
-    # paths = build_paths()
-    # chapter_map = parse_chapters(paths["sentences_txt"])
-    chapter_map = parse_chapters(SENTENCES_PATH)
-
-    if not chapter_map:
-        print("⚠ No chapters detected – nothing to do.")
-        return
-
-    # --- Chapter selection ---
-    if SINGLE_CHAPTER is not None:
-        chapter_map = {c: ids for c, ids in chapter_map.items() if c == SINGLE_CHAPTER}
-        print(f"✅ Processing only Chapter {SINGLE_CHAPTER}")
-    else:
-        last_chapter = max(chapter_map)
-        start = START_CHAPTER or 1
-        end   = END_CHAPTER or last_chapter
-        if start > end:
-            raise ValueError(f"Invalid chapter range: start {start} > end {end}")
-        chapter_map = {c: ids for c, ids in chapter_map.items() if start <= c <= end}
-        print(f"✅ Processing Chapters {start}–{end}")
-
-    # --- Process each chapter ---
-    for chap_num, sentence_ids in chapter_map.items():
-        # Exclude sentences
-        sentence_ids = [sid for sid in sentence_ids if sid not in EXCLUDED_SENTENCES]
-        if not sentence_ids:
-            print(f"⚠ Chapter {chap_num}: all sentences excluded – skipped")
-            continue
-
-        
-        clip_paths = gather_clips(sentence_ids)
-
-        if not clip_paths:
-            print(f"⚠ Chapter {chap_num}: no clips found – skipped")
-            continue
-
-        if MODE == "homework":
-            random.shuffle(clip_paths)
-
-        for chunk_idx, sub in enumerate(chunk(clip_paths, CHUNK_SIZE), start=1):
-            write_chunk(chap_num, chunk_idx, sub)
 
 def main() -> None:
     random.seed(SHUFFLE_SEED)

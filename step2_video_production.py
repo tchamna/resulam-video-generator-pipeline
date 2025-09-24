@@ -16,7 +16,8 @@ from moviepy.editor import (
 import time
 import logging
 from contextlib import contextmanager
-from pathlib import Path
+
+import step0_config as cfg
 
 
 
@@ -24,27 +25,42 @@ from pathlib import Path
 # USE_PRIVATE_ASSETS = True   # switch here: True → private_assets, False → normal assets
 # USE_PRIVATE_ASSETS = False   # switch here: True → private_assets, False → normal assets
 
-BASE_DIR = Path(os.getcwd())
+# BASE_DIR = Path(os.getcwd())
 
-# Check if env variable exists, otherwise set default
-if "USE_PRIVATE_ASSETS" in os.environ:
-    USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
-    print("using Private Assets from env variable")
-else:
-    print(" Private Assets not found from the env variable")
-    # Local default when not provided by runner
-    USE_PRIVATE_ASSETS = True   # change default if needed
+# # Check if env variable exists, otherwise set default
+# if "USE_PRIVATE_ASSETS" in os.environ:
+#     USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
+#     print("using Private Assets from env variable")
+# else:
+#     print(" Private Assets not found from the env variable")
+#     # Local default when not provided by runner
+#     USE_PRIVATE_ASSETS = True   # change default if needed
+
+BASE_DIR = cfg.BASE_DIR
+USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS", "1" 
+                               if cfg.USE_PRIVATE_ASSETS 
+                               else "0") == "1"
 
 # ── USER SETTINGS ───────────────────────────────────────────────────────
-LANGUAGE = "Duala"          # e.g., "Nufi", "Yoruba", "Duala"
-MODE = "lecture"            # "lecture" or "homework"
+# LANGUAGE = "Duala"          # e.g., "Nufi", "Yoruba", "Duala"
+# MODE = "lecture"            # "lecture" or "homework"
+
 # MODE = "homework"            # "lecture" or "homework"
-REBUILD_ALL = False         # Force regeneration of existing videos
-REBUILD_ALL = True         # Force regeneration of existing videos
+
+# REBUILD_ALL = False         # Force regeneration of existing videos
+# REBUILD_ALL = True         # Force regeneration of existing videos
+
+LANGUAGE = cfg.LANGUAGE.title()
+MODE = cfg.MODE.lower()              # "lecture" | "homework"
+REBUILD_ALL = bool(getattr(cfg, "REBUILD_ALL", False))
 
 # ── PARALLELISM CONFIG ──────────────────────────────────────────────────
-FFMPEG_THREADS = 4
-MAX_PARALLEL_JOBS = 5
+# FFMPEG_THREADS = 4
+# MAX_PARALLEL_JOBS = 5
+
+FFMPEG_THREADS = int(getattr(cfg, "FFMPEG_THREADS", 4))
+MAX_PARALLEL_JOBS = int(getattr(cfg, "MAX_PARALLEL_JOBS", 5))
+
 AVAILABLE_CPUS = os.cpu_count() or 1
 
 while FFMPEG_THREADS > AVAILABLE_CPUS:
@@ -61,7 +77,6 @@ def get_asset_path(relative_path: str) -> Path:
     base = BASE_DIR / ("private_assets" if USE_PRIVATE_ASSETS else "assets")
     return base / relative_path
 
-
 # ── PATHS SETUP ─────────────────────────────────────────────────────
 # FONT_PATH = BASE_DIR / "assets"/ "Fonts" / "arialbd.ttf"
 # LOGO_PATH = BASE_DIR/ "assets" / "resulam_logo_resurrectionLangue.png"
@@ -75,12 +90,17 @@ LOGO_PATH = get_asset_path("resulam_logo_resurrectionLangue.png")
 LOG_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-MODE_FOLDER = "Lecture" if MODE.lower() == "lecture" else "Homework"
-VIDEO_OUT_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Results_Videos/{MODE_FOLDER}")
+# MODE_FOLDER = "Lecture" if MODE.lower() == "lecture" else "Homework"
+
+
+
+VIDEO_OUT_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Results_Videos/{MODE.title()}")
 VIDEO_OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+
+
 BACKGROUND_DIR = get_asset_path(f"Backgrounds_Selected/{LANGUAGE.title()}")
-LOCAL_AUDIO_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Results_Audios/gen2_normalized_padded")
+LOCAL_AUDIO_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/Results_Audios/{MODE}_gen2_normalized_padded")
 ENG_AUDIO_DIR = get_asset_path("EnglishOnly")
  # english_audio_path = BASE_DIR/"assets"/"EnglishOnly" / sentence["english_audio"]
    
@@ -88,31 +108,50 @@ SENTENCES_PATH = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/{LANGUA
 
 # ── FONTS SETUP ─────────────────────────────────────────────────────
 
-VIDEO_RESOLUTION = (1920, 1080)
-FRAME_RATE = 24
-REPEAT_PAUSE_SECONDS = 5
-TRAILING_PAUSE_SECONDS = 3
-DEFAULT_FONT_SIZE = 100
-HEADER_GAP_RATIO = 0.30
-MARGIN_RIGHT = 25
-MARGIN_TOP = 15
+# VIDEO_RESOLUTION = (1920, 1080)
+# FRAME_RATE = 24
+# INNER_PAUSE_DURATION = 5
+# TRAILING_PAUSE_DURATION = 3
+# DEFAULT_FONT_SIZE = 100
+# HEADER_GAP_RATIO = 0.30
+# MARGIN_RIGHT = 25
+# MARGIN_TOP = 15
 
-PROJECT_MODE = "Test"  # or "Production"
-PROJECT_MODE = "Production"  # or "Production"
+# PROJECT_MODE = "Test"  # or "Production"
+# PROJECT_MODE = "Production"  # or "Production"
 
-INTRO_MESSAGES = {
-    "Nufi": "Yū' Mfʉ́ɑ́'sí, Mfāhngə́ə́:",
-    "Swahili": "Sikiliza, rudia na tafsiri:",
-    "Yoruba": "Tẹ́tí gbọ́, tunsọ, ṣe ògbùfọ̀:",
-    "Duala": "Seŋgâ, Timbísɛ́lɛ̂ na Túkwâ:",
-}
-DEFAULT_INTRO = "Listen, repeat and translate:"
+VIDEO_RESOLUTION = tuple(getattr(cfg, "VIDEO_RESOLUTION", (1920, 1080)))
+FRAME_RATE = int(getattr(cfg, "FRAME_RATE", 24))
+INNER_PAUSE_DURATION = float(getattr(cfg, "INNER_PAUSE_DURATION", 3))
+TRAILING_PAUSE_DURATION = float(getattr(cfg, "TRAILING_PAUSE_DURATION", 3))
+DEFAULT_FONT_SIZE = int(getattr(cfg, "DEFAULT_FONT_SIZE", 100))
+HEADER_GAP_RATIO = float(getattr(cfg, "HEADER_GAP_RATIO", 0.30))
+MARGIN_RIGHT = int(getattr(cfg, "MARGIN_RIGHT", 25))
+MARGIN_TOP = int(getattr(cfg, "MARGIN_TOP", 15))
+
+PROJECT_MODE = getattr(cfg, "PROJECT_MODE", "Production")
+
+
+# INTRO_MESSAGES = {
+#     "Nufi": "Yū' Mfʉ́ɑ́'sí, Mfāhngə́ə́:",
+#     "Swahili": "Sikiliza, rudia na tafsiri:",
+#     "Yoruba": "Tẹ́tí gbọ́, tunsọ, ṣe ògbùfọ̀:",
+#     "Duala": "Seŋgâ, Timbísɛ́lɛ̂ na Túkwâ:",
+# }
+# DEFAULT_INTRO = "Listen, repeat and translate:"
+
+INTRO_MESSAGES = cfg.INTRO_MESSAGES
+
+DEFAULT_INTRO = getattr(cfg, "DEFAULT_INTRO", "Listen, repeat and translate:")
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ── LOGGING CONFIG ──────────────────────────────────────────────────────
 
 # Use the script name but place it inside the Phrasebook folder
 log_file = LOG_DIR / Path(__file__).with_suffix(".log").name
+
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -232,23 +271,18 @@ def calculate_font_size(sentence: Dict) -> int:
 def create_video_clip(sentence: Dict):
     """
     Build a single video clip for one sentence.
-    Shows correct sentence ID in header and captions (source, english, french).
+    Uses fixed pixel anchors and line spacing for consistent layout.
     """
 
     print(f"▶ Creating video for sentence ID {sentence['id']}")
-
     output_path = VIDEO_OUT_DIR / f"{LANGUAGE.lower()}_sentence_{sentence['id']}.mp4"
-    
-    
+
     if output_path.exists() and not REBUILD_ALL:
         print(f"✔ Skipped (already exists): {output_path.name}")
         return
 
-    # english_audio_path = BASE_DIR/"assets"/"EnglishOnly" / sentence["english_audio"]
     local_audio_path = LOCAL_AUDIO_DIR / sentence["local_audio"]
     english_audio_path = ENG_AUDIO_DIR / sentence["english_audio"]
-
-
     if not local_audio_path.exists() or not english_audio_path.exists():
         print(f"⚠ Missing audio for sentence {sentence['id']}")
         return
@@ -257,80 +291,99 @@ def create_video_clip(sentence: Dict):
     english_audio = AudioFileClip(str(english_audio_path))
 
     # --- Audio sequencing ---
-    if MODE == "lecture":
-        total_duration = english_audio.duration + REPEAT_PAUSE_SECONDS + local_audio.duration + TRAILING_PAUSE_SECONDS
+    if MODE.lower() == "lecture":
+        total_duration = english_audio.duration + INNER_PAUSE_DURATION + local_audio.duration + TRAILING_PAUSE_DURATION
         audio = CompositeAudioClip([
             english_audio.set_start(0),
-            local_audio.set_start(english_audio.duration + REPEAT_PAUSE_SECONDS)
+            local_audio.set_start(english_audio.duration + INNER_PAUSE_DURATION),
         ])
     else:  # homework mode
-        d = local_audio.duration
-        pause = REPEAT_PAUSE_SECONDS
-        nufi_1_start = 0
-        nufi_2_start = d + pause
-        nufi_3_start = nufi_2_start + d + pause
-        eng_start = nufi_3_start + d + pause
-        total_duration = eng_start + english_audio.duration + TRAILING_PAUSE_SECONDS
+        local_audio_duration, pause = local_audio.duration, INNER_PAUSE_DURATION
+        local_lang_1_start = 0 # first playback at 0 seconds
+        local_lang_2_start = local_audio_duration + pause # second playback after first + pause
+        local_lang_3_start = local_lang_2_start + local_audio_duration + pause # third playback after second + pause
+        eng_start = local_lang_3_start + local_audio_duration + pause
+        total_duration = eng_start + english_audio.duration + TRAILING_PAUSE_DURATION
 
         audio = CompositeAudioClip([
-            local_audio.set_start(nufi_1_start),
-            local_audio.set_start(nufi_2_start),
-            local_audio.set_start(nufi_3_start),
+            local_audio.set_start(local_lang_1_start),
+            local_audio.set_start(local_lang_2_start),
+            local_audio.set_start(local_lang_3_start),
             english_audio.set_start(eng_start),
         ])
 
+    # --- Font & spacing ---
     font_size = calculate_font_size(sentence)
-    clips = [ImageClip(str(sentence["background"])).set_duration(total_duration)]
+    line_spacing = int(font_size * 1.2)
+    y_position_lecture = 120  # anchor for sentence block
+    y_position_homework = 120 # anchor for intro
 
-    def add_text(text, color, start, duration, y_offset, wrap=True):
-        size = (VIDEO_RESOLUTION[0] - 200, None) if wrap else None
-        clip = TextClip(text, font=str(FONT_PATH), fontsize=font_size,
-                        color=color, method="caption" if wrap else "label", size=size)
-        clip = clip.set_position(("center", y_offset)).set_start(start).set_duration(duration)
-        clips.append(clip)
-        return y_offset + clip.h + int(font_size * 0.2)
+    bg = ImageClip(str(sentence["background"])).set_duration(total_duration)
+    clips = [bg]
 
     # --- Header row ---
-    y_header = MARGIN_TOP
     clips.append(TextClip(LANGUAGE.title(), font=str(FONT_PATH),
                           fontsize=int(font_size * 0.55), color="yellow", method="label")
-                 .set_position((15, y_header)).set_duration(total_duration))
-
+                 .set_position((15, MARGIN_TOP)).set_duration(total_duration))
     support_clip = TextClip("Please Support Resulam", font=str(FONT_PATH),
                             fontsize=int(font_size * 0.5), color="yellow", method="label")
-    support_clip = support_clip.set_position(("right", y_header)).set_duration(total_duration)
+    support_clip = support_clip.set_position(("right", MARGIN_TOP)).set_duration(total_duration)
     clips.append(support_clip)
-
-    # ✅ Correct sentence number
-    sentence_number = str(sentence["id"])
-    num_clip = TextClip(sentence_number, font=str(FONT_PATH),
+    num_clip = TextClip(str(sentence["id"]), font=str(FONT_PATH),
                         fontsize=int(font_size * 0.6), color="white", method="label")
     num_clip = num_clip.set_position(
-        (VIDEO_RESOLUTION[0] - num_clip.w - MARGIN_RIGHT,
-         y_header + support_clip.h + int(font_size * 0.15))
+        (VIDEO_RESOLUTION[0] - num_clip.w - MARGIN_RIGHT, MARGIN_TOP + support_clip.h + 10)
     ).set_duration(total_duration)
     clips.append(num_clip)
 
     # --- Captions ---
-    y_text = y_header + int(font_size * HEADER_GAP_RATIO) + 80
-    if MODE == "lecture":
-        y_text = add_text(sentence["source"], "white", 0, total_duration, y_text)
-        y_text = add_text(sentence["english"], "yellow", 0, total_duration, y_text)
-        _ = add_text(sentence["french"], "white", 0, total_duration, y_text)
-    else:  # homework mode
+    if MODE.lower() == "lecture":
+        clips.append(TextClip(sentence["source"], font=str(FONT_PATH), fontsize=font_size,
+                              color="white", method="caption",
+                              size=(VIDEO_RESOLUTION[0]-200, None))
+                     .set_position(("center", y_position_lecture)).set_duration(total_duration))
+        clips.append(TextClip(sentence["english"], font=str(FONT_PATH), fontsize=font_size,
+                              color="yellow", method="caption",
+                              size=(VIDEO_RESOLUTION[0]-200, None))
+                     .set_position(("center", y_position_lecture + line_spacing)).set_duration(total_duration))
+        clips.append(TextClip(sentence["french"], font=str(FONT_PATH), fontsize=font_size,
+                              color="white", method="caption",
+                              size=(VIDEO_RESOLUTION[0]-200, None))
+                     .set_position(("center", y_position_lecture + 2*line_spacing)).set_duration(total_duration))
+
+    else:  # homework
         intro_msg = INTRO_MESSAGES.get(LANGUAGE.title(), DEFAULT_INTRO)
+        # Intro (top)
+        clips.append(TextClip(intro_msg, font=str(FONT_PATH), fontsize=int(font_size*0.9),
+                              color="white", method="label")
+                     .set_position(("center", y_position_homework)).set_start(0).set_duration(local_lang_2_start))
+        clips.append(TextClip("Listen, repeat and translate", font=str(FONT_PATH), fontsize=font_size,
+                              color="yellow", method="label")
+                     .set_position(("center", y_position_homework + line_spacing)).set_start(0).set_duration(local_lang_2_start))
 
-        # 1. First Nufi playback → intro only
-        y_text = add_text(intro_msg, "white", 0, nufi_2_start, y_text)
-        y_text = add_text("Listen, repeat and translate", "yellow", 0, nufi_2_start, y_text)
+        # Second playback → only local
+        clips.append(TextClip(sentence["source"], font=str(FONT_PATH), fontsize=font_size,
+                              color="white", method="caption",
+                              size=(VIDEO_RESOLUTION[0]-200, None))
+                     .set_position(("center", y_position_homework))
+                     .set_start(local_lang_2_start).set_duration(local_lang_3_start - local_lang_2_start))
 
-        # 2. Second Nufi playback → only local sentence
-        y_text = add_text(sentence["source"], "white", nufi_2_start, nufi_3_start - nufi_2_start, y_text)
-
-        # 3. Third Nufi playback → local + English + French
-        y_text = add_text(sentence["source"], "white", nufi_3_start, total_duration - nufi_3_start, y_text)
-        y_text = add_text(sentence["english"], "yellow", nufi_3_start, total_duration - nufi_3_start, y_text)
-        _ = add_text(sentence["french"], "white", nufi_3_start, total_duration - nufi_3_start, y_text)
+        # Third playback → local + English + French stacked at y_position_homework
+        clips.append(TextClip(sentence["source"], font=str(FONT_PATH), fontsize=font_size,
+                              color="white", method="caption",
+                              size=(VIDEO_RESOLUTION[0]-200, None))
+                     .set_position(("center", y_position_homework))
+                     .set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start))
+        clips.append(TextClip(sentence["english"], font=str(FONT_PATH), fontsize=font_size,
+                              color="yellow", method="caption",
+                              size=(VIDEO_RESOLUTION[0]-200, None))
+                     .set_position(("center", y_position_homework + line_spacing)) 
+                     .set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start))
+        clips.append(TextClip(sentence["french"], font=str(FONT_PATH), fontsize=font_size,
+                              color="white", method="caption",
+                              size=(VIDEO_RESOLUTION[0]-200, None))
+                     .set_position(("center", y_position_homework + 2*line_spacing)) 
+                     .set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start))
 
     # --- Logos ---
     for side in ["left", "right"]:
@@ -353,13 +406,13 @@ def create_video_clip(sentence: Dict):
         print(f"❌ Error rendering sentence {sentence['id']}: {error}")
         Path(temp_audio_file).unlink(missing_ok=True)
         Path(temp_video_file).unlink(missing_ok=True)
-
-
 # ── MULTI-THREAD RENDERING ──────────────────────────────────────────────
 # chapter_ranges = chapters
 # sentences = tagged_sentences
 # paths = CONFIG
 # mode = MODE 
+# chapter_index, start_id, end_id = 1, 1, 173
+# sentence = segment[0]
 
 def render_all_sentences(
     sentences: List[Dict],
@@ -450,11 +503,17 @@ def render_all_sentences(
 # ── ENTRY POINT ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     
-    start_chapter=1
-    end_chapter=32
+    # start_chapter=1
+    # end_chapter=32
     
-    start_sentence, end_sentence=1638, 1638
-    start_sentence, end_sentence=None, None
+    # start_sentence, end_sentence=1638, 1638
+    # start_sentence, end_sentence=None, None
+    
+    start_chapter = getattr(cfg, "FILTER_CHAPTER_START", None)
+    end_chapter   = getattr(cfg, "FILTER_CHAPTER_END", None)
+    start_sentence = getattr(cfg, "FILTER_SENTENCE_START", None)
+    end_sentence   = getattr(cfg, "FILTER_SENTENCE_END", None)
+
 
     
     with log_time("Load Sentences"):
@@ -470,6 +529,12 @@ if __name__ == "__main__":
     with log_time("Assign Backgrounds"):
         tagged_sentences = assign_backgrounds(raw_sentences, backgrounds)
 
+   
     with log_time("Render Sentences"):
-        render_all_sentences(tagged_sentences, chapters,
-                            start_chapter=start_chapter, end_chapter=end_chapter)
+        render_all_sentences(
+            tagged_sentences, chapters,
+            start_chapter=start_chapter, 
+            end_chapter=end_chapter,
+            start_sentence=start_sentence, 
+            end_sentence=end_sentence, 
+        )

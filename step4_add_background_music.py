@@ -10,27 +10,42 @@ from moviepy.editor import (
 )
 import logging
 from contextlib import contextmanager
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
+
+import step0_config as cfg
 
 
 # ── USER SETTINGS ──────────────────────────────────────────────────────
-LANGUAGE  = "Duala"
-MODE      = "lecture"
-BASE_DIR  = Path(os.getcwd())
 
-# Choose mode
-USE_PARALLEL = True   # 🔁 Set to False for sequential processing
-FILES_TO_PROCESS = [] # ["sentence_001.mp4", "sentence_005.mp3"]  # leave empty to process all
-FILES_TO_PROCESS = ["duala_chapter_1_chunk_17.mp4","duala_chapter_2_chunk_01.mp4"] # ["sentence_001.mp4", "sentence_005.mp3"]  # leave empty to process all
+# BASE_DIR        = Path(os.getcwd())
+BASE_DIR = cfg.BASE_DIR
 
-if "USE_PRIVATE_ASSETS" in os.environ:
-    USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
-    print("using Private Assets from env variable")
-else:
-    print(" Private Assets not found from the env variable")
-    USE_PRIVATE_ASSETS = True
 
+LANGUAGE = cfg.LANGUAGE.title()                 # e.g. "Duala"
+MODE     = cfg.MODE.lower()                     # "lecture" | "homework"
+
+
+USE_PARALLEL    = True    # 🔁 Set to False for sequential processing
+USE_PARALLEL    = False    # 🔁 Set to False for sequential processing
+MAX_WORKERS     = 2       # Python jobs in parallel
+FFMPEG_THREADS  = 2       # Threads per ffmpeg process (set 0 or None for auto)
+
+FILES_TO_PROCESS = []     # Leave empty to process all
+
+
+# if "USE_PRIVATE_ASSETS" in os.environ:
+#     USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
+#     print("using Private Assets from env variable")
+# else:
+#     print(" Private Assets not found from the env variable")
+#     USE_PRIVATE_ASSETS = True
+
+# Env override wins, otherwise fallback to cfg.USE_PRIVATE_ASSETS
+USE_PRIVATE_ASSETS = os.getenv(
+    "USE_PRIVATE_ASSETS",
+    "1" if getattr(cfg, "USE_PRIVATE_ASSETS", True) else "0"
+) == "1"
 
 def get_asset_path(relative_path: str) -> Path:
     base = BASE_DIR / ("private_assets" if USE_PRIVATE_ASSETS else "assets")
@@ -90,8 +105,6 @@ def log_time(step_name: str):
 # ── WORKER FUNCTION ────────────────────────────────────────────────────
 def process_file(filename: str, music_path: str, combined_dir: str, output_dir: str):
     try:
-        from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_audioclips, CompositeAudioClip
-
         file_path = Path(combined_dir) / filename
         bg_music = AudioFileClip(music_path).volumex(0.1)
 
@@ -114,11 +127,32 @@ def process_file(filename: str, music_path: str, combined_dir: str, output_dir: 
 
         # Export
         output_path = Path(output_dir) / f"mixed_{filename}"
+
+        # ffmpeg params
+        ffmpeg_params = ["-movflags", "faststart"]
+        if FFMPEG_THREADS and FFMPEG_THREADS > 0:
+            ffmpeg_params += ["-threads", str(FFMPEG_THREADS)]
+
         if clip:
             final_clip = clip.set_audio(mixed_audio)
-            final_clip.write_videofile(str(output_path), codec="libx264", remove_temp=False, logger=None)
+            final_clip.write_videofile(
+                str(output_path),
+                codec="libx264",
+                remove_temp=True,   # ✅ auto-clean temp files
+                logger="bar",       # ✅ show progress bar
+                ffmpeg_params=ffmpeg_params
+            )
+            final_clip.close()
         else:
-            mixed_audio.write_audiofile(str(output_path), codec="mp3", logger=None)
+            mixed_audio.write_audiofile(
+                str(output_path),
+                codec="mp3",
+                logger="bar"
+            )
+
+        # Close resources
+        voice_audio.close()
+        bg_music.close()
 
         return f"✅ {filename} -> {output_path}"
 
@@ -143,10 +177,10 @@ if __name__ == "__main__":
         logging.info(f"🎯 Files selected: {len(files)}")
 
         if USE_PARALLEL:
-            workers = max(1, multiprocessing.cpu_count() - 1)
-            logging.info(f"⚡ Parallel mode ON → using {workers} workers")
+            workers = max(1, MAX_WORKERS)
+            logging.info(f"⚡ Parallel mode ON → using {workers} workers (threads)")
             results = []
-            with ProcessPoolExecutor(max_workers=workers) as executor:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
                 future_to_file = {
                     executor.submit(process_file, f, str(MUSIC_PATH), str(COMBINED_VIDEO_DIR), str(output_folder)): f
                     for f in files
@@ -164,3 +198,13 @@ if __name__ == "__main__":
                 results.append(result)
 
         logging.info("🏁 All files processed")
+
+        # ── CLEANUP TEMP FILES ───────────────────────────────────────────────
+        for ext in ("*.mp3", "*.m4a"):
+            for f in BASE_DIR.glob(ext):
+                if "MPY_wvf_snd" in f.name or f.name.startswith("temp_audio_"):
+                    try:
+                        f.unlink()
+                        logging.info(f"🗑️ Deleted temp file {f}")
+                    except Exception as e:
+                        logging.warning(f"Could not delete {f}: {e}")

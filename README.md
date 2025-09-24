@@ -70,10 +70,10 @@ Organize your files as follows
 ## Customizable Parameters
 
 - **local_language_name = 'yoruba'**: Specify the target local language.
-- **silence_threshold = 1.5**: Chuncks separated by silence longer than this are considered distinct. you can adjust this based on your project.
-- **silence_padding_duration = 3**: Desired silence duration between audio chunks.
-- **repeat_local_audio = 2**: Set to `2` to repeat the local language audio twice, or `1` if already repeated.
-- **flag_pad = True**: Enable (`True`) or disable (`False`) extending silence between chunks.
+- **SILENCE_THRESH = 1.5**: Chuncks separated by silence longer than this are considered distinct. you can adjust this based on your project.
+- **INNER_PAUSE_DURATION = 3**: Desired silence duration between audio chunks.
+- **REPEAT_LOCAL_AUDIO = 2**: Set to `2` to repeat the local language audio twice, or `1` if already repeated.
+- **FLAG_PAD = True**: Enable (`True`) or disable (`False`) extending silence between chunks.
 
 # Step 2: Video Production Pipeline
 
