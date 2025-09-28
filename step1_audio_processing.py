@@ -62,8 +62,8 @@ FLAG_PAD                  = bool(getattr(cfg, "FLAG_PAD", True))
 
 FILTER_SENTENCE_START = getattr(cfg, "FILTER_SENTENCE_START", None)
 FILTER_SENTENCE_END   = getattr(cfg, "FILTER_SENTENCE_END", None)
-FILTER_CHAPTER_START  = getattr(cfg, "FILTER_CHAPTER_START", None)
-FILTER_CHAPTER_END    = getattr(cfg, "FILTER_CHAPTER_END", None)
+START_CHAPTER  = getattr(cfg, "START_CHAPTER", None)
+END_CHAPTER    = getattr(cfg, "END_CHAPTER", None)
 
 
 # ─── Validation ─────────────────────────────────────────────────────────
@@ -317,11 +317,11 @@ def apply_processing_filter(file_list: list, chapter_ranges: list) -> list:
         end_num   = FILTER_SENTENCE_END
         print(f"ℹ️  Sentence range: {start_num}–{end_num}")
 
-    elif FILTER_CHAPTER_START is not None and FILTER_CHAPTER_END is not None:
+    elif START_CHAPTER is not None and END_CHAPTER is not None:
         try:
-            start_num = chapter_ranges[FILTER_CHAPTER_START - 1][0]
-            end_num   = chapter_ranges[FILTER_CHAPTER_END - 1][1]
-            print(f"ℹ️  Chapter range: {FILTER_CHAPTER_START}–{FILTER_CHAPTER_END} "
+            start_num = chapter_ranges[START_CHAPTER - 1][0]
+            end_num   = chapter_ranges[END_CHAPTER - 1][1]
+            print(f"ℹ️  Chapter range: {START_CHAPTER}–{END_CHAPTER} "
                   f"(sentences {start_num}–{end_num})")
         except IndexError:
             print("❌ Invalid chapter range.")

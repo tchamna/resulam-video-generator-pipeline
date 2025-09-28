@@ -10,7 +10,7 @@ import os
 LANGUAGE = "Duala"         # e.g., "Duala", "Nufi", "Yoruba"
 
 MODE = "homework"          # "lecture" or "homework"
-ENV = "test"         # "production" or "test"
+ENV = "production"         # "production" or "test"
 
 # MODE = "lecture"          # "lecture" or "homework"
 # ENV = "test"         # "production" or "test"
@@ -65,10 +65,10 @@ FILTER_SENTENCE_START = None
 FILTER_SENTENCE_END   = None
 
 # Option 2: Filter by a range of chapter numbers.
-# FILTER_CHAPTER_START = 1
-# FILTER_CHAPTER_END   = 3
-FILTER_CHAPTER_START = None
-FILTER_CHAPTER_END   = None 
+START_CHAPTER = 15
+END_CHAPTER   = 15
+# START_CHAPTER = None
+# END_CHAPTER   = None 
 
 
 # Step 2: Video Production settings
@@ -115,8 +115,6 @@ CHUNK_SIZE = 10 # Number of videos per chunk
 
 # Control which chapters to process
 SINGLE_CHAPTER = None   # e.g., 12 → only Chapter 12
-START_CHAPTER  = 1     # default = 1
-END_CHAPTER    = 32     # None = until last chapter
 
 # Excluded sentence IDs
 EXCLUDED_SENTENCES = {

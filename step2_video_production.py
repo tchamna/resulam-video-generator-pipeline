@@ -123,6 +123,7 @@ SENTENCES_PATH = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook/{LANGUA
 VIDEO_RESOLUTION = tuple(getattr(cfg, "VIDEO_RESOLUTION", (1920, 1080)))
 FRAME_RATE = int(getattr(cfg, "FRAME_RATE", 24))
 INNER_PAUSE_DURATION = float(getattr(cfg, "INNER_PAUSE_DURATION", 3))
+INNER_PAUSE_DURATION_HW = float(getattr(cfg, "INNER_PAUSE_DURATION_HW", 5))
 TRAILING_PAUSE_DURATION = float(getattr(cfg, "TRAILING_PAUSE_DURATION", 3))
 DEFAULT_FONT_SIZE = int(getattr(cfg, "DEFAULT_FONT_SIZE", 100))
 HEADER_GAP_RATIO = float(getattr(cfg, "HEADER_GAP_RATIO", 0.30))
@@ -298,7 +299,7 @@ def create_video_clip(sentence: Dict):
             local_audio.set_start(english_audio.duration + INNER_PAUSE_DURATION),
         ])
     else:  # homework mode
-        local_audio_duration, pause = local_audio.duration, INNER_PAUSE_DURATION
+        local_audio_duration, pause = local_audio.duration, INNER_PAUSE_DURATION_HW
         local_lang_1_start = 0 # first playback at 0 seconds
         local_lang_2_start = local_audio_duration + pause # second playback after first + pause
         local_lang_3_start = local_lang_2_start + local_audio_duration + pause # third playback after second + pause
@@ -406,6 +407,168 @@ def create_video_clip(sentence: Dict):
         print(f"❌ Error rendering sentence {sentence['id']}: {error}")
         Path(temp_audio_file).unlink(missing_ok=True)
         Path(temp_video_file).unlink(missing_ok=True)
+
+def create_video_clip(sentence: Dict):
+    """
+    Build a single video clip for one sentence.
+    Uses dynamic heights so text never overlaps when wrapping.
+    """
+
+    print(f"▶ Creating video for sentence ID {sentence['id']}")
+    output_path = VIDEO_OUT_DIR / f"{LANGUAGE.lower()}_sentence_{sentence['id']}.mp4"
+
+    if output_path.exists() and not REBUILD_ALL:
+        print(f"✔ Skipped (already exists): {output_path.name}")
+        return
+
+    local_audio_path = LOCAL_AUDIO_DIR / sentence["local_audio"]
+    english_audio_path = ENG_AUDIO_DIR / sentence["english_audio"]
+    if not local_audio_path.exists() or not english_audio_path.exists():
+        print(f"⚠ Missing audio for sentence {sentence['id']}")
+        return
+
+    local_audio = AudioFileClip(str(local_audio_path))
+    english_audio = AudioFileClip(str(english_audio_path))
+
+    # --- Audio sequencing ---
+    if MODE.lower() == "lecture":
+        total_duration = english_audio.duration + INNER_PAUSE_DURATION + local_audio.duration + TRAILING_PAUSE_DURATION
+        audio = CompositeAudioClip([
+            english_audio.set_start(0),
+            local_audio.set_start(english_audio.duration + INNER_PAUSE_DURATION),
+        ])
+    else:  # homework mode
+        local_audio_duration, pause = local_audio.duration, INNER_PAUSE_DURATION_HW
+        local_lang_1_start = 0
+        local_lang_2_start = local_audio_duration + pause
+        local_lang_3_start = local_lang_2_start + local_audio_duration + pause
+        eng_start = local_lang_3_start + local_audio_duration + pause
+        total_duration = eng_start + english_audio.duration + TRAILING_PAUSE_DURATION
+
+        audio = CompositeAudioClip([
+            local_audio.set_start(local_lang_1_start),
+            local_audio.set_start(local_lang_2_start),
+            local_audio.set_start(local_lang_3_start),
+            english_audio.set_start(eng_start),
+        ])
+
+    # --- Font & spacing ---
+    font_size = calculate_font_size(sentence)
+    y_position_lecture = 120
+    y_position_homework = 120
+
+    bg = ImageClip(str(sentence["background"])).set_duration(total_duration)
+    clips = [bg]
+
+    # --- Header row ---
+    clips.append(TextClip(LANGUAGE.title(), font=str(FONT_PATH),
+                          fontsize=int(font_size * 0.55), color="yellow", method="label")
+                 .set_position((15, MARGIN_TOP)).set_duration(total_duration))
+    support_clip = TextClip("Please Support Resulam", font=str(FONT_PATH),
+                            fontsize=int(font_size * 0.5), color="yellow", method="label")
+    support_clip = support_clip.set_position(("right", MARGIN_TOP)).set_duration(total_duration)
+    clips.append(support_clip)
+    num_clip = TextClip(str(sentence["id"]), font=str(FONT_PATH),
+                        fontsize=int(font_size * 0.6), color="white", method="label")
+    num_clip = num_clip.set_position(
+        (VIDEO_RESOLUTION[0] - num_clip.w - MARGIN_RIGHT, MARGIN_TOP + support_clip.h + 10)
+    ).set_duration(total_duration)
+    clips.append(num_clip)
+
+    # --- Captions ---
+    if MODE.lower() == "lecture":
+        current_y = y_position_lecture
+        # Local
+        src_clip = TextClip(sentence["source"], font=str(FONT_PATH), fontsize=font_size,
+                            color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
+                            ).set_duration(total_duration)
+        src_clip = src_clip.set_position(("center", current_y))
+        clips.append(src_clip)
+        current_y += src_clip.h + 10
+
+        # English
+        eng_clip = TextClip(sentence["english"], font=str(FONT_PATH), fontsize=font_size,
+                            color="yellow", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
+                            ).set_duration(total_duration)
+        eng_clip = eng_clip.set_position(("center", current_y))
+        clips.append(eng_clip)
+        current_y += eng_clip.h + 10
+
+        # French
+        fr_clip = TextClip(sentence["french"], font=str(FONT_PATH), fontsize=font_size,
+                           color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
+                           ).set_duration(total_duration)
+        fr_clip = fr_clip.set_position(("center", current_y))
+        clips.append(fr_clip)
+
+    else:  # homework
+        intro_msg = INTRO_MESSAGES.get(LANGUAGE.title(), DEFAULT_INTRO)
+        current_y = y_position_homework
+
+        # Intro
+        intro_clip = TextClip(intro_msg, font=str(FONT_PATH), fontsize=int(font_size*0.9),
+                              color="white", method="label"
+                              ).set_position(("center", current_y)).set_start(0).set_duration(local_lang_2_start)
+        clips.append(intro_clip)
+        current_y += intro_clip.h + 10
+
+        repeat_clip = TextClip("Listen, repeat and translate", font=str(FONT_PATH), fontsize=font_size,
+                               color="yellow", method="label"
+                               ).set_position(("center", current_y)).set_start(0).set_duration(local_lang_2_start)
+        clips.append(repeat_clip)
+
+        # Second playback → only local
+        src_clip2 = TextClip(sentence["source"], font=str(FONT_PATH), fontsize=font_size,
+                             color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
+                             ).set_position(("center", y_position_homework)
+                             ).set_start(local_lang_2_start).set_duration(local_lang_3_start - local_lang_2_start)
+        clips.append(src_clip2)
+
+        # Third playback → dynamic stack
+        current_y = y_position_homework
+        src_clip3 = TextClip(sentence["source"], font=str(FONT_PATH), fontsize=font_size,
+                             color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
+                             ).set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start)
+        src_clip3 = src_clip3.set_position(("center", current_y))
+        clips.append(src_clip3)
+        current_y += src_clip3.h + 10
+
+        eng_clip3 = TextClip(sentence["english"], font=str(FONT_PATH), fontsize=font_size,
+                             color="yellow", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
+                             ).set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start)
+        eng_clip3 = eng_clip3.set_position(("center", current_y))
+        clips.append(eng_clip3)
+        current_y += eng_clip3.h + 10
+
+        fr_clip3 = TextClip(sentence["french"], font=str(FONT_PATH), fontsize=font_size,
+                            color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
+                            ).set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start)
+        fr_clip3 = fr_clip3.set_position(("center", current_y))
+        clips.append(fr_clip3)
+
+    # --- Logos ---
+    for side in ["left", "right"]:
+        clips.append(ImageClip(str(LOGO_PATH)).resize(height=100)
+                     .set_position((side, "bottom")).set_duration(total_duration))
+
+    # --- Render ---
+    temp_audio_file = f"temp_audio_{uuid4().hex}.m4a"
+    temp_video_file = output_path.with_suffix(".tmp.mp4")
+    try:
+        CompositeVideoClip(clips).set_audio(audio).write_videofile(
+            str(temp_video_file), fps=FRAME_RATE, codec="libx264", audio_codec="aac",
+            temp_audiofile=temp_audio_file, remove_temp=True,
+            ffmpeg_params=["-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1", "-movflags", "+faststart"],
+            preset="ultrafast", threads=FFMPEG_THREADS,
+        )
+        shutil.move(temp_video_file, output_path)
+        print(f"✅ Rendered: {output_path.name}")
+    except Exception as error:
+        print(f"❌ Error rendering sentence {sentence['id']}: {error}")
+        Path(temp_audio_file).unlink(missing_ok=True)
+        Path(temp_video_file).unlink(missing_ok=True)
+
+
 # ── MULTI-THREAD RENDERING ──────────────────────────────────────────────
 # chapter_ranges = chapters
 # sentences = tagged_sentences
@@ -509,8 +672,8 @@ if __name__ == "__main__":
     # start_sentence, end_sentence=1638, 1638
     # start_sentence, end_sentence=None, None
     
-    start_chapter = getattr(cfg, "FILTER_CHAPTER_START", None)
-    end_chapter   = getattr(cfg, "FILTER_CHAPTER_END", None)
+    start_chapter = getattr(cfg, "START_CHAPTER", None)
+    end_chapter   = getattr(cfg, "END_CHAPTER", None)
     start_sentence = getattr(cfg, "FILTER_SENTENCE_START", None)
     end_sentence   = getattr(cfg, "FILTER_SENTENCE_END", None)
 

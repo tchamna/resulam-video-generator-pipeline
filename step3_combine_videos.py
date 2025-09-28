@@ -54,8 +54,8 @@ CHUNK_SIZE           = int(getattr(cfg, "CHUNK_SIZE", 10))
 
 # Chapter selection (all optional in cfg)
 SINGLE_CHAPTER = getattr(cfg, "SINGLE_CHAPTER", None)
-START_CHAPTER  = getattr(cfg, "FILTER_CHAPTER_START", 1)
-END_CHAPTER    = getattr(cfg, "FILTER_CHAPTER_END", 32)
+START_CHAPTER  = getattr(cfg, "START_CHAPTER", 1)
+END_CHAPTER    = getattr(cfg, "END_CHAPTER", 32)
 
 # Exclusions
 EXCLUDED_SENTENCES = set(getattr(cfg, "EXCLUDED_SENTENCES", set()))
