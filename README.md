@@ -113,3 +113,20 @@ This module creates videos by combining the prepared audio and text files with v
 # Step 3: Video Chunks Processor
 
 This final script is a post-production tool that combines multiple individual videos into larger, chapter-based video files.
+
+## Quick benchmark and tuning
+
+- To run a quick ffmpeg micro-benchmark on one sample mp3:
+
+```powershell
+python tools\benchmark_pipeline.py --step normalize --sample 1
+```
+
+- To tune parallelism before a full run, set env vars in PowerShell like:
+
+```powershell
+$env:MAX_WORKERS = 4; $env:FFMPEG_THREADS = 2
+python step0_main_pipeline.py
+```
+
+Adjust `MAX_WORKERS` and `FFMPEG_THREADS` so that `MAX_WORKERS * FFMPEG_THREADS <=` number of CPU cores on your machine.

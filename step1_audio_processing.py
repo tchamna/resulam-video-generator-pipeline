@@ -8,7 +8,7 @@ import time
 import logging
 from pathlib import Path
 from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 import numpy as np
 import pyloudnorm as pyln
@@ -203,6 +203,13 @@ def remove_trailing_silence(audio_segment, silence_thresh=-50, chunk_size=10):
     return AudioSegment.silent(duration=0)
 
 def pad_and_join_chunks(seg: AudioSegment, apply_padding: bool = True) -> tuple[AudioSegment, int]:
+    """
+    - Trim leading/trailing silence
+    - Split on long silences to insert INNER_PAUSE_DURATION between parts
+    - Add head silence once
+    - Repeat the cleaned audio REPEAT_LOCAL_AUDIO times separated by INNER_PAUSE_DURATION
+    - Add tail silence only once at the very end
+    """
     def trim_leading_trailing(audio: AudioSegment, silence_thresh: int = -50) -> AudioSegment:
         ranges = detect_nonsilent(audio, min_silence_len=100, silence_thresh=silence_thresh)
         if not ranges:
@@ -217,30 +224,38 @@ def pad_and_join_chunks(seg: AudioSegment, apply_padding: bool = True) -> tuple[
         keep_silence=False
     )
 
-    head = AudioSegment.silent(duration=TRAILING_PAUSE_DURATION * 1000)
-    tail = AudioSegment.silent(duration=TRAILING_PAUSE_DURATION * 1000)
+    head = AudioSegment.silent(duration=TRAILING_PAUSE_DURATION * 1000)   # keep as "intro" pause
+    tail = AudioSegment.silent(duration=TRAILING_PAUSE_DURATION * 1000)   # final pause
+    pad = AudioSegment.silent(duration=int(INNER_PAUSE_DURATION * 1000))
 
+    # --- Build one clean block without tail ---
     if not apply_padding or len(chunks) == 0:
         cleaned = trim_leading_trailing(seg)
-        final_audio = head + cleaned + tail
-        return normalize(final_audio), 0
-
-    if len(chunks) > 5:
+        base_audio = cleaned
+    elif len(chunks) > 5:
         cleaned = trim_leading_trailing(seg)
-        final_audio = head + cleaned + tail
-        return normalize(final_audio), 1
+        base_audio = cleaned
+    else:
+        parts = []
+        for i, c in enumerate(chunks):
+            cleaned_chunk = trim_leading_trailing(c)
+            parts.append(cleaned_chunk)
+            if i < len(chunks) - 1:
+                parts.append(pad)
+        base_audio = sum(parts, AudioSegment.silent(duration=0))
 
-    pad = AudioSegment.silent(duration=int(INNER_PAUSE_DURATION * 1000))
-    parts = [head]
-    for i, c in enumerate(chunks):
-        cleaned_chunk = trim_leading_trailing(c)
-        parts.append(cleaned_chunk)
-        if i < len(chunks) - 1:
-            parts.append(pad)
-    parts.append(tail)
+    # --- Repeat the block with INNER_PAUSE_DURATION between repeats ---
+    if REPEAT_LOCAL_AUDIO > 1:
+        repeated = []
+        for i in range(REPEAT_LOCAL_AUDIO):
+            repeated.append(base_audio)
+            if i < REPEAT_LOCAL_AUDIO - 1:
+                repeated.append(pad)
+        base_audio = sum(repeated, AudioSegment.silent(duration=0))
 
-    final_audio = sum(parts, AudioSegment.silent(duration=0))
-    final_audio = final_audio * max(1, REPEAT_LOCAL_AUDIO)
+    # --- Add only ONE head and ONE tail ---
+    final_audio = head + base_audio + tail
+
     return normalize(final_audio), len(chunks)
 
 def export_padded_audios(files_to_process: list, out_dir: Path):
@@ -417,12 +432,12 @@ def batch_process_mp3s(
     skipped, processed, failed = 0, 0, 0
     guard = edge_guard_ms / 1000.0
 
-    for src in files:
-        output_path = out_dir / src.name
-        if src.name in existing:
-            skipped += 1
-            continue
+    # Read parallelism/threads config from central config if available
+    max_workers = getattr(cfg, "MAX_WORKERS", 2)
+    ffmpeg_threads = getattr(cfg, "FFMPEG_THREADS", 1)
 
+    def build_command(src: Path):
+        output_path = out_dir / src.name
         safe_silences = []
         if apply_silence:
             sils = detect_silences(
@@ -472,7 +487,9 @@ def batch_process_mp3s(
         af_chain = ",".join(af_parts)
 
         cmd = [
-            "ffmpeg", "-y", "-i", str(src),
+            "ffmpeg", "-y",
+            "-threads", str(ffmpeg_threads),
+            "-i", str(src),
             "-vn",
             "-af", af_chain,
             "-ar", str(TARGET_SR),
@@ -481,12 +498,28 @@ def batch_process_mp3s(
             str(output_path)
         ]
 
-        try:
-            subprocess.run(cmd, check=True, text=True, capture_output=True)
-            processed += 1
-        except subprocess.CalledProcessError as e:
-            failed += 1
-            logging.error(f"❌ {src.name} failed\n{e.stderr[:300]}")
+        return src.name, cmd, output_path
+
+    # Run ffmpeg commands in parallel to utilize multiple cores
+    tasks = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_src = {}
+        for src in files:
+            if src.name in existing:
+                skipped += 1
+                continue
+            name, cmd, out_path = build_command(src)
+            future = executor.submit(subprocess.run, cmd, check=True, text=True, capture_output=True)
+            future_to_src[future] = (name, out_path)
+
+        for fut in as_completed(future_to_src):
+            name, out_path = future_to_src[fut]
+            try:
+                fut.result()
+                processed += 1
+            except subprocess.CalledProcessError as e:
+                failed += 1
+                logging.error(f"❌ {name} failed\n{e.stderr[:300]}")
 
     logging.info(f"Step (Normalize): {processed} processed, {skipped} skipped, {failed} failed")
 
@@ -516,6 +549,8 @@ def is_new_file_better(temp_path, existing_path):
     old_dur = float(mediainfo(str(existing_path))["duration"])
     return new_dur > old_dur
 
+
+
 def reduce_noise_from_audio(input_file, output_file):
     try:
         y, sr = librosa.load(input_file, sr=None)
@@ -526,7 +561,7 @@ def reduce_noise_from_audio(input_file, output_file):
         print(f"Error: {input_file} not found.")
     except Exception as e:
         print(f"NR error: {e}")
-
+        
 def resolve_local_lang_dir_name(lang_title: str, env: str, mode: str) -> str:
     if env == "production" and mode == "lecture":
         return f"{lang_title}Only"
@@ -591,213 +626,222 @@ logging.basicConfig(
 # ======================================================================
 # Main pipeline
 # ======================================================================
-
-global_start = time.perf_counter()
-prefix = f"{local_language.lower()}_phrasebook_"
-subset_files_now: list[Path] = []
-
-if USE_FILTERING:
-    # original_dir = local_audio_path / "original_audios"
-    original_dir = local_audio_path 
-    os.makedirs(original_dir, exist_ok=True)
-
-    generated_folders = {
-        "original_audios",
-        "gen1_normalized",
-        "gen2_normalized_padded",
-        "gen3_bilingual_sentences",
-        "bilingual_sentences_chapters",
-    }
-
-    for item in local_audio_path.iterdir():
-        if item.is_dir() and item.name not in generated_folders:
-            try:
-                shutil.move(str(item), original_dir / item.name)
-                print(f"📂 Moved {item.name} → original_audios")
-            except Exception as e:
-                print(f"❌ Move error '{item}': {e}")
-
-    with log_time("Step 3 (Gather Files)"):
-        all_audio_files, _ = get_audio(original_dir, check_subfolders=True)
-
-    with log_time("Step 4 (Apply Filter)"):
-        source_files_to_process = apply_processing_filter(all_audio_files, chapter_ranges)
-
-    if not source_files_to_process:
-        print("❌ No files after filtering.")
-        raise SystemExit
-
-    def parallel_copy():
-        subset = []
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(copy_and_rename, Path(f)) for f in source_files_to_process]
-            for fut in as_completed(futures):
-                res = fut.result()
-                if res:
-                    subset.append(res)
-        return subset
-
-    with log_time("Step 5 (Copy + Rename)"):
-        subset_files_now = parallel_copy()
-
-    working_input_dir = local_audio_path
-    
-    subdirs = check_subdirectories(local_audio_path)
-    if subdirs:
-        try:
-            _ = extract_audios_and_move_original(local_audio_path)
-        except Exception as e:
-            print(f"❌ Extract error: {e}")
-else:
-    subdirs = check_subdirectories(local_audio_path)
-    if subdirs:
-        try:
-            _ = extract_audios_and_move_original(local_audio_path)
-        except Exception as e:
-            print(f"❌ Extract error: {e}")
-
-    files_rename(local_audio_path,
-                 prefix=prefix, suffix="",
-                 replace="", by="",
-                 remove_first=0, remove_last=0,
-                 lower_all=True, upper_all=False,
-                 extensions=(".mp3", ".wav"))
-
-    subset_files_now, _ = get_audio(local_audio_path)
-    working_input_dir = local_audio_path
-
-# Normalize
-with log_time(f"Step 6 (Normalize {len(subset_files_now)} files)"):
-    batch_process_mp3s(
-        input_folder=str(working_input_dir),
-        output_folder=str(normalized_audio_path),
-        files_to_process=subset_files_now,
-        silence_noise_db=-32.0,
-        silence_min_dur=0.22,
-        edge_guard_ms=80,
-        apply_silence=False,
-        preset="medium"
-    )
-
-# Pad
-normalized_files_to_process = [normalized_audio_path / f.name for f in subset_files_now]
-with log_time(f"Step 7 (Pad {len(normalized_files_to_process)} files)"):
-    export_padded_audios(normalized_files_to_process, out_dir=normalized_padded_path)
-
-# Merge bilingual
-Trailing_silent = AudioSegment.silent(duration=cfg.TRAILING_PAUSE_DURATION * 1000)
-Inside_silent   = AudioSegment.silent(duration=cfg.INNER_PAUSE_DURATION * 1000)
-
-def merge_bilingual_audio(
-    eng_audio_dir: Path,
-    local_audio_dir: Path,
-    out_dir: Path,
-    target_ids: set[int] = None,
-) -> None:
-    
-    out_dir.mkdir(parents=True, exist_ok=True)
-    existing_files = {f.name for f in out_dir.glob("*.mp3")}
-    skipped, processed, failed = 0, 0, 0
-
-    eng_files, _   = get_audio(eng_audio_dir)
-    local_files, _ = get_audio(local_audio_dir)
-    eng_map   = create_audio_map(eng_files)
-    local_map = create_audio_map(local_files)
-
-    in_scope_ids = sorted(local_map.keys()) if not target_ids else [i for i in local_map.keys() if i in target_ids]
-
-    total = len(in_scope_ids)
-    logging.info(f"▶️ Merging bilingual for {total} files…")
-
-    for idx, number in enumerate(in_scope_ids, start=1):
-        local_file = local_map[number]
-        eng_file   = eng_map.get(number)
-
-        if eng_file:
-            output_name = f"{eng_file.stem.split('_')[0]}_{local_file.name}"
-        else:
-            output_name = f"no_english_{local_file.name}"
-
-        if output_name in existing_files:
-            skipped += 1
-            continue
-
-        try:
-            local_audio = remove_trailing_silence(AudioSegment.from_file(local_file))
-            if eng_file:
-                eng_audio = remove_trailing_silence(AudioSegment.from_file(eng_file))
-                if MODE == "lecture":
-                    output_audio = Trailing_silent + eng_audio + Inside_silent + local_audio + Trailing_silent
-                else:
-                    output_audio = Trailing_silent + (local_audio + Inside_silent) * 2 + eng_audio + Trailing_silent
-            else:
-                output_audio = local_audio
-
-            (out_dir / output_name).parent.mkdir(parents=True, exist_ok=True)
-            output_audio.export(out_dir / output_name, format="mp3", bitrate="192k")
-            processed += 1
-        except Exception as e:
-            failed += 1
-            logging.error(f"[{idx}/{total}] ❌ Error #{number}: {e}")
-
-    logging.info(f"Step (Merge bilingual): {processed} processed, {skipped} skipped, {failed} failed")
-
-def concatenate_chapters(bilingual_output_path: Path, chapter_ranges, target_ids: set[int]):
-    combined_chapters_audio_folder = bilingual_output_path / "bilingual_sentences_chapters"
-    os.makedirs(combined_chapters_audio_folder, exist_ok=True)
-
-    bilingual_files, _ = get_audio(bilingual_output_path, ext=["*.mp3"], check_subfolders=False)
-    bilingual_files = [f for f in bilingual_files if get_digits_numbers_from_string(f.name) in target_ids]
-
-    chapter_to_files = defaultdict(list)
-    for f in bilingual_files:
-        num = get_digits_numbers_from_string(f.name)
-        chap = get_chapter(chapter_ranges, num)
-        if chap:
-            chapter_to_files[chap].append(f)
-
-    rng = random.Random(SHUFFLE_SEED)
-
-    for chap, files in sorted(chapter_to_files.items(), key=lambda x: x[0]):
-        # if MODE == "homework":
-        #     rng.shuffle(files)
+if __name__ == "__main__":
         
-        if SHUFFLE_HOMEWORK and (MODE == "homework"):
-            rng.shuffle(files)
+    global_start = time.perf_counter()
+    prefix = f"{local_language.lower()}_phrasebook_"
+    subset_files_now: list[Path] = []
+
+    if USE_FILTERING:
+        original_dir = local_audio_path / "original_audios"
+        # original_dir = local_audio_path 
+        os.makedirs(original_dir, exist_ok=True)
+
+        generated_folders = {
+            "original_audios",
+            "gen1_normalized",
+            "gen2_normalized_padded",
+            "gen3_bilingual_sentences",
+            "bilingual_sentences_chapters",
+        }
+
+        for item in local_audio_path.iterdir():
+            if item.is_dir() and item.name not in generated_folders:
+                try:
+                    shutil.move(str(item), original_dir / item.name)
+                    print(f"📂 Moved {item.name} → original_audios")
+                except Exception as e:
+                    print(f"❌ Move error '{item}': {e}")
+
+        with log_time("Step 3 (Gather Files)"):
+            all_audio_files, _ = get_audio(original_dir, check_subfolders=True)
+
+        with log_time("Step 4 (Apply Filter)"):
+            source_files_to_process = apply_processing_filter(all_audio_files, chapter_ranges)
+
+        if not source_files_to_process:
+            print("❌ No files after filtering.")
+            raise SystemExit
+
+        def parallel_copy():
+            subset = []
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [executor.submit(copy_and_rename, Path(f)) for f in source_files_to_process]
+                for fut in as_completed(futures):
+                    res = fut.result()
+                    if res:
+                        subset.append(res)
+            return subset
+
+        with log_time("Step 5 (Copy + Rename)"):
+            subset_files_now = parallel_copy()
+
+        working_input_dir = local_audio_path
+        
+        subdirs = check_subdirectories(local_audio_path)
+        if subdirs:
+            try:
+                _ = extract_audios_and_move_original(local_audio_path)
+            except Exception as e:
+                print(f"❌ Extract error: {e}")
+    else:
+        subdirs = check_subdirectories(local_audio_path)
+        if subdirs:
+            try:
+                _ = extract_audios_and_move_original(local_audio_path)
+            except Exception as e:
+                print(f"❌ Extract error: {e}")
+
+        files_rename(local_audio_path,
+                    prefix=prefix, suffix="",
+                    replace="", by="",
+                    remove_first=0, remove_last=0,
+                    lower_all=True, upper_all=False,
+                    extensions=(".mp3", ".wav"))
+
+        subset_files_now, _ = get_audio(local_audio_path)
+        working_input_dir = local_audio_path
+
+    # Normalize
+    with log_time(f"Step 6 (Normalize {len(subset_files_now)} files)"):
+        batch_process_mp3s(
+            input_folder=str(working_input_dir),
+            output_folder=str(normalized_audio_path),
+            files_to_process=subset_files_now,
+            silence_noise_db=-32.0,
+            silence_min_dur=0.22,
+            edge_guard_ms=80,
+            apply_silence=False,
+            preset="medium"
+        )
+
+    # Pad
+    normalized_files_to_process = [normalized_audio_path / f.name for f in subset_files_now]
+    with log_time(f"Step 7 (Pad {len(normalized_files_to_process)} files)"):
+        export_padded_audios(normalized_files_to_process, out_dir=normalized_padded_path)
+
+    # Merge bilingual
+    Trailing_silent = AudioSegment.silent(duration=cfg.TRAILING_PAUSE_DURATION * 1000)
+    Inside_silent   = AudioSegment.silent(duration=cfg.INNER_PAUSE_DURATION * 1000)
+
+    def merge_bilingual_audio(
+        eng_audio_dir: Path,
+        local_audio_dir: Path,
+        out_dir: Path,
+        target_ids: set[int] = None,
+    ) -> None:
+        
+        out_dir.mkdir(parents=True, exist_ok=True)
+        existing_files = {f.name for f in out_dir.glob("*.mp3")}
+        skipped, processed, failed = 0, 0, 0
+
+        eng_files, _   = get_audio(eng_audio_dir)
+        local_files, _ = get_audio(local_audio_dir)
+        eng_map   = create_audio_map(eng_files)
+        local_map = create_audio_map(local_files)
+
+        in_scope_ids = sorted(local_map.keys()) if not target_ids else [i for i in local_map.keys() if i in target_ids]
+
+        total = len(in_scope_ids)
+        logging.info(f"▶️ Merging bilingual for {total} files…")
+
+        for idx, number in enumerate(in_scope_ids, start=1):
+            local_file = local_map[number]
+            eng_file   = eng_map.get(number)
+
+            if eng_file:
+                output_name = f"{eng_file.stem.split('_')[0]}_{local_file.name}"
+            else:
+                output_name = f"no_english_{local_file.name}"
+
+            if output_name in existing_files:
+                skipped += 1
+                continue
+
+            try:
+                local_audio = remove_trailing_silence(AudioSegment.from_file(local_file))
+                if eng_file:
+                    eng_audio = remove_trailing_silence(AudioSegment.from_file(eng_file))
+                    if MODE == "lecture":
+                        output_audio = Trailing_silent + eng_audio + Inside_silent + local_audio + Trailing_silent
+                    else:
+                        output_audio = Trailing_silent + (local_audio + Inside_silent) * 2 + eng_audio + Trailing_silent
+                else:
+                    output_audio = local_audio
+
+                (out_dir / output_name).parent.mkdir(parents=True, exist_ok=True)
+                output_audio.export(out_dir / output_name, format="mp3", bitrate="192k")
+                processed += 1
+            except Exception as e:
+                failed += 1
+                logging.error(f"[{idx}/{total}] ❌ Error #{number}: {e}")
+
+        logging.info(f"Step (Merge bilingual): {processed} processed, {skipped} skipped, {failed} failed")
+
+    def concatenate_chapters(bilingual_output_path: Path, chapter_ranges, target_ids: set[int]):
+        combined_chapters_audio_folder = bilingual_output_path / "bilingual_sentences_chapters"
+        os.makedirs(combined_chapters_audio_folder, exist_ok=True)
+
+        bilingual_files, _ = get_audio(bilingual_output_path, ext=["*.mp3"], check_subfolders=False)
+        bilingual_files = [f for f in bilingual_files if get_digits_numbers_from_string(f.name) in target_ids]
+
+        chapter_to_files = defaultdict(list)
+        for f in bilingual_files:
+            num = get_digits_numbers_from_string(f.name)
+            chap = get_chapter(chapter_ranges, num)
+            if chap:
+                chapter_to_files[chap].append(f)
+
+        rng = random.Random(SHUFFLE_SEED)
+
+        for chap, files in sorted(chapter_to_files.items(), key=lambda x: x[0]):
+            # if MODE == "homework":
+            #     rng.shuffle(files)
+            
+            if SHUFFLE_HOMEWORK and (MODE == "homework"):
+                rng.shuffle(files)
 
 
-        print(f"🎵 Concatenating {len(files)} files for {chap} (shuffle={MODE=='homework'})")
+            print(f"🎵 Concatenating {len(files)} files for {chap} (shuffle={MODE=='homework'})")
 
-        combined = None
-        for f in files:
-            seg = AudioSegment.from_file(f)
-            combined = seg if combined is None else combined + seg
+            combined = None
+            for f in files:
+                seg = AudioSegment.from_file(f)
+                combined = seg if combined is None else combined + seg
 
-        output_path = combined_chapters_audio_folder / f"phrasebook_{local_language}_{chap}.mp3"
-        combined.export(output_path, format="mp3", bitrate="192k")
-        print(f"✅ Exported {output_path.name}")
+            output_path = combined_chapters_audio_folder / f"phrasebook_{local_language}_{chap}.mp3"
+            combined.export(output_path, format="mp3", bitrate="192k")
+            print(f"✅ Exported {output_path.name}")
 
-# Merge bilingual (sentence-level, no shuffle)
-target_ids = {get_digits_numbers_from_string(f.name) for f in subset_files_now}
-with log_time(f"Step 8 (Merge bilingual, {len(target_ids)} IDs)"):
-    merge_bilingual_audio(
-        eng_audio_path,
-        normalized_padded_path,
-        bilingual_output_path,
-        target_ids=target_ids
-    )
+    # Merge bilingual (sentence-level, no shuffle)
+    target_ids = {get_digits_numbers_from_string(f.name) for f in subset_files_now}
+    with log_time(f"Step 8 (Merge bilingual, {len(target_ids)} IDs)"):
+        merge_bilingual_audio(
+            eng_audio_path,
+            normalized_padded_path,
+            bilingual_output_path,
+            target_ids=target_ids
+        )
 
-# Noise reduction (overwrite in place)
-for file in bilingual_output_path.glob("*.mp3"):
-    try:
-        reduce_noise_from_audio(str(file), str(file))
-    except Exception as e:
-        print(f"❌ NR error {file.name}: {e}")
+    # Noise reduction (overwrite in place) - parallelized
+    nr_files = list(bilingual_output_path.glob("*.mp3"))
+    if nr_files:
+        max_workers_nr = getattr(cfg, "MAX_WORKERS", 2)
+        logging.info(f"▶️ Running noise reduction in parallel ({len(nr_files)} files, workers={max_workers_nr})")
+        with ProcessPoolExecutor(max_workers=max_workers_nr) as executor:
+            futures = {executor.submit(reduce_noise_from_audio, str(f), str(f)): f for f in nr_files}
+            for fut in as_completed(futures):
+                f = futures[fut]
+                try:
+                    fut.result()
+                    logging.info(f"✅ NR complete: {f.name}")
+                except Exception as e:
+                    logging.error(f"❌ NR error {f.name}: {e}")
 
-# Concatenate per chapter (shuffle applied here if homework)
-with log_time("Step 9 (Concatenate per chapter)"):
-    concatenate_chapters(bilingual_output_path, chapter_ranges, target_ids)
+    # Concatenate per chapter (shuffle applied here if homework)
+    with log_time("Step 9 (Concatenate per chapter)"):
+        concatenate_chapters(bilingual_output_path, chapter_ranges, target_ids)
 
-# ─── End timing ─────────────────────────────────────────────────────────
-elapsed = time.perf_counter() - start_time
-logging.info(f"Script completed in {format_elapsed(elapsed)}")
+    # ─── End timing ─────────────────────────────────────────────────────────
+    elapsed = time.perf_counter() - start_time
+    logging.info(f"Script completed in {format_elapsed(elapsed)}")
