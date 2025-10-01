@@ -6,8 +6,8 @@ import os
 # List of step scripts in order
 steps = [
     # "step1_audio_processing.py",
-    "step2_video_production.py",
-    "step3_combine_videos.py",
+    # "step2_video_production.py",
+    # "step3_combine_videos.py",
     "step4_add_background_music.py",
 ]
 

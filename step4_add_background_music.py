@@ -28,11 +28,14 @@ MODE     = cfg.MODE.lower()                     # "lecture" | "homework"
 # Chapter selection (all optional in cfg)
 SINGLE_CHAPTER = getattr(cfg, "SINGLE_CHAPTER", None)
 
-START_CHAPTER = getattr(cfg, "START_CHAPTER", 1)
-END_CHAPTER   = getattr(cfg, "END_CHAPTER", None)  # None = until last
+_cfg_start = getattr(cfg, "START_CHAPTER", None)
+_cfg_end = getattr(cfg, "END_CHAPTER", None)
+
+# Ensure numeric types for comparisons; default START_CHAPTER to 1 when not set
+START_CHAPTER = 1 if _cfg_start is None else int(_cfg_start)
+END_CHAPTER = None if _cfg_end is None else int(_cfg_end)  # None = until last
 
 
-USE_PARALLEL    = True    # 🔁 Set to False for sequential processing
 USE_PARALLEL    = False    # 🔁 Set to False for sequential processing
 MAX_WORKERS     = 2       # Python jobs in parallel
 FFMPEG_THREADS  = 2       # Threads per ffmpeg process (set 0 or None for auto)
@@ -40,13 +43,6 @@ FFMPEG_THREADS  = 2       # Threads per ffmpeg process (set 0 or None for auto)
 FILES_TO_PROCESS = []     # Leave empty to process all
 
 
-
-# if "USE_PRIVATE_ASSETS" in os.environ:
-#     USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS") == "1"
-#     print("using Private Assets from env variable")
-# else:
-#     print(" Private Assets not found from the env variable")
-#     USE_PRIVATE_ASSETS = True
 
 # Env override wins, otherwise fallback to cfg.USE_PRIVATE_ASSETS
 USE_PRIVATE_ASSETS = os.getenv(
@@ -61,11 +57,16 @@ def get_asset_path(relative_path: str) -> Path:
 
 # ── FOLDER LAYOUT ──────────────────────────────────────────────────────
 LANG_BASE_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook")
-VIDEO_DIR     = get_asset_path(f"{LANG_BASE_DIR}/Results_Videos/{MODE.title()}")
+# VIDEO_DIR should point inside the language base dir's Results_Videos folder
+VIDEO_DIR     = LANG_BASE_DIR / f"Results_Videos/{MODE.title()}"
 COMBINED_VIDEO_DIR = VIDEO_DIR / f"{LANGUAGE.title()}_Chapters_Combined"
 # COMBINED_VIDEO_DIR = Path(r"D:\Resulam\Videos_Production\private_assets\Languages\DualaPhrasebook\Results_Audios\gen3_bilingual_sentences\bilingual_sentences_chapters")
 
-MUSIC_PATH    = LANG_BASE_DIR / "duala_music_background.mp3"
+# MUSIC_PATH    = LANG_BASE_DIR / "duala_music_background.mp3"
+MUSIC_FILENAME = cfg.MUSIC_FILENAME if hasattr(cfg, "MUSIC_FILENAME") else f"{LANGUAGE.lower()}_music_background.mp3"
+MUSIC_PATH = LANG_BASE_DIR / MUSIC_FILENAME
+if not MUSIC_PATH.exists():
+    raise FileNotFoundError(f"Background music file not found: {MUSIC_PATH}")
 
 output_folder = COMBINED_VIDEO_DIR / "mixed_output"
 os.makedirs(output_folder, exist_ok=True)
@@ -112,73 +113,6 @@ def log_time(step_name: str):
 
 
 # ── WORKER FUNCTION ────────────────────────────────────────────────────
-
-def process_file(filename: str, music_path: str, combined_dir: str, output_dir: str):
-    try:
-        file_path = Path(combined_dir) / filename
-        bg_music = AudioFileClip(music_path).volumex(0.1)
-
-        # ---- Detect if it's a video or audio ----
-        is_video = filename.lower().endswith(('.mp4', '.avi', '.mov'))
-        if is_video:
-            clip = VideoFileClip(str(file_path))
-            voice_audio = clip.audio
-        else:
-            clip = None
-            voice_audio = AudioFileClip(str(file_path))
-
-        # ---- Loop and fade background music ----
-        loops = int(voice_audio.duration // bg_music.duration) + 1
-        bg_looped = concatenate_audioclips([bg_music] * loops).set_duration(voice_audio.duration)
-        fade_duration = min(3, voice_audio.duration * 0.1)
-        bg_looped = bg_looped.audio_fadein(fade_duration).audio_fadeout(fade_duration)
-
-        # ---- Mix tracks ----
-        mixed_audio = CompositeAudioClip([voice_audio, bg_looped])
-
-        # ✅ Make sure fps is set (no need for nchannels)
-        audio_fps = getattr(voice_audio, "fps", 44100)
-        mixed_audio = mixed_audio.set_fps(audio_fps)
-
-        output_path = Path(output_dir) / f"mixed_{filename}"
-
-        ffmpeg_params = ["-movflags", "faststart"]
-        if FFMPEG_THREADS and FFMPEG_THREADS > 0:
-            ffmpeg_params += ["-threads", str(FFMPEG_THREADS)]
-
-        if is_video:
-            final_clip = clip.set_audio(mixed_audio)
-            final_clip.write_videofile(
-                str(output_path),
-                codec="libx264",
-                audio_codec="aac",
-                audio_fps=audio_fps,
-                remove_temp=True,
-                logger="bar",
-                ffmpeg_params=ffmpeg_params,
-            )
-            final_clip.close()
-        else:
-            mixed_audio.write_audiofile(
-                str(output_path),
-                fps=audio_fps,
-                codec="libmp3lame",      # ✅ correct codec for MP3
-                bitrate="192k",
-                logger="bar",
-                ffmpeg_params=ffmpeg_params,
-            )
-
-        mixed_audio.close()
-        voice_audio.close()
-        bg_music.close()
-        if clip:
-            clip.close()
-
-        return f"✅ {filename} -> {output_path}"
-
-    except Exception as e:
-        return f"❌ {filename} failed: {e}"
-
 def process_file(filename: str, music_path: str, combined_dir: str, output_dir: str):
     try:
         file_path = Path(combined_dir) / filename
