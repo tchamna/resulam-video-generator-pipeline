@@ -36,6 +36,7 @@ START_CHAPTER = 1 if _cfg_start is None else int(_cfg_start)
 END_CHAPTER = None if _cfg_end is None else int(_cfg_end)  # None = until last
 
 
+
 USE_PARALLEL    = False    # 🔁 Set to False for sequential processing
 MAX_WORKERS     = 2       # Python jobs in parallel
 FFMPEG_THREADS  = 2       # Threads per ffmpeg process (set 0 or None for auto)
@@ -60,7 +61,13 @@ LANG_BASE_DIR = get_asset_path(f"Languages/{LANGUAGE.title()}Phrasebook")
 # VIDEO_DIR should point inside the language base dir's Results_Videos folder
 VIDEO_DIR     = LANG_BASE_DIR / f"Results_Videos/{MODE.title()}"
 COMBINED_VIDEO_DIR = VIDEO_DIR / f"{LANGUAGE.title()}_Chapters_Combined"
+
+#Audio only directory
 # COMBINED_VIDEO_DIR = Path(r"D:\Resulam\Videos_Production\private_assets\Languages\DualaPhrasebook\Results_Audios\gen3_bilingual_sentences\bilingual_sentences_chapters")
+AUDIO_DIR     = LANG_BASE_DIR / f"Results_Audios/{MODE.lower()}_gen3_bilingual_sentences/bilingual_sentences_chapters"
+
+# # Add background music to audio files
+# COMBINED_VIDEO_DIR = AUDIO_DIR
 
 # MUSIC_PATH    = LANG_BASE_DIR / "duala_music_background.mp3"
 MUSIC_FILENAME = cfg.MUSIC_FILENAME if hasattr(cfg, "MUSIC_FILENAME") else f"{LANGUAGE.lower()}_music_background.mp3"
@@ -191,14 +198,28 @@ def process_file(filename: str, music_path: str, combined_dir: str, output_dir: 
 if __name__ == "__main__":
     with log_time("Total processing"):
         
+        
+        # name = f
+
         def get_chapter_num(name: str) -> int | None:
             """
             Try to extract a chapter number from filenames like:
-            'duala_chapter_15_chunk_02.mp4'
+            - 'duala_chapter_15_chunk_02.mp4'
+            - 'phrasebook_bamoun_Chap2.mp3'
             Returns int or None if no match.
             """
-            m = re.search(r"chapter[_-](\d+)", name, re.IGNORECASE)
+            # Look for patterns like "chapter_15" or "Chap2"
+            m = re.search(r"(?:chapter|chap)[_-]?\s*(\d+)", name, re.IGNORECASE)
             return int(m.group(1)) if m else None
+
+        # def get_chapter_num(name: str) -> int | None:
+        #     """
+        #     Try to extract a chapter number from filenames like:
+        #     'duala_chapter_15_chunk_02.mp4'
+        #     Returns int or None if no match.
+        #     """
+        #     m = re.search(r"chapter[_-](\d+)", name, re.IGNORECASE)
+        #     return int(m.group(1)) if m else None
 
         all_files = [
             f for f in natsorted(os.listdir(COMBINED_VIDEO_DIR))

@@ -6,9 +6,10 @@ import os
 # List of step scripts in order
 steps = [
     # "step1_audio_processing.py",
-    # "step2_video_production.py",
-    # "step3_combine_videos.py",
-    "step4_add_background_music.py",
+    "step2_video_production.py",
+    "step3_combine_videos.py",
+    "step4_udemy_normalization.py",
+    "step5_add_background_music_new.py",
 ]
 
 def run_script(script):

@@ -82,7 +82,8 @@ def get_asset_path(relative_path: str) -> Path:
 # FONT_PATH = BASE_DIR / "assets"/ "Fonts" / "arialbd.ttf"
 # LOGO_PATH = BASE_DIR/ "assets" / "resulam_logo_resurrectionLangue.png"
 
-FONT_PATH = get_asset_path("Fonts/arialbd.ttf")
+FONT_PATH = get_asset_path( cfg.FONT_PATH)
+
 LOGO_PATH = get_asset_path("resulam_logo_resurrectionLangue.png")
 
 # assets_dir = BASE_DIR / "assets"

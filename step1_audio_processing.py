@@ -34,8 +34,8 @@ ENV  = cfg.ENV
 SHUFFLE_HOMEWORK = bool(getattr(cfg, "SHUFFLE_HOMEWORK", MODE == "homework"))
 SHUFFLE_SEED = getattr(cfg, "SHUFFLE_SEED", None)  # None => different each run
 
-local_language = cfg.LANGUAGE.lower()
-local_language_title = cfg.LANGUAGE.title()
+LOCAL_LANGUAGE = cfg.LANGUAGE.lower()
+LOCAL_LANGUAGE_TITLE = cfg.LANGUAGE.title()
 
 
 # ─── USE FILTERING ─────────────────────────────────────────
@@ -161,7 +161,7 @@ def files_rename(directory, prefix="", suffix="", replace="", by="",
         print("Both lower_all and upper_all True. Defaulting to lowercase.")
         upper_all = False
     for filename in os.listdir(directory):
-        if not filename.startswith(local_language):
+        if not filename.startswith(LOCAL_LANGUAGE):
             original_filename = filename
             if lower_all:
                 filename = filename.lower()
@@ -529,7 +529,7 @@ def copy_and_rename(src_file: Path) -> Path | None:
         if num is None:
             return None
 
-        target_name = f"{local_language.lower()}_phrasebook_{num}.mp3"
+        target_name = f"{LOCAL_LANGUAGE.lower()}_phrasebook_{num}.mp3"
         target_path = local_audio_path / target_name
 
         if not target_path.exists():
@@ -593,26 +593,26 @@ def log_time(step_name: str):
 # Paths & logging
 # ======================================================================
 
-local_lang_audio_dir_name = resolve_local_lang_dir_name(local_language_title, ENV, MODE)
+local_lang_audio_dir_name = resolve_local_lang_dir_name(LOCAL_LANGUAGE_TITLE, ENV, MODE)
 
 local_language_dir = get_asset_path(
-    f"Languages/{local_language_title}Phrasebook/{local_lang_audio_dir_name}"
+    f"Languages/{LOCAL_LANGUAGE_TITLE}Phrasebook/{local_lang_audio_dir_name}"
 ).resolve()
 local_audio_path = local_language_dir
 
 eng_audio_path = get_asset_path("EnglishOnly")
-log_dir = get_asset_path(f"Languages/{local_language_title}Phrasebook/Logs")
+log_dir = get_asset_path(f"Languages/{LOCAL_LANGUAGE_TITLE}Phrasebook/Logs")
 log_dir.mkdir(parents=True, exist_ok=True)
 log_file = log_dir / Path(__file__).with_suffix(".log").name
 
 normalized_audio_path = get_asset_path(
-    f"Languages/{local_language_title}Phrasebook/Results_Audios/{MODE}_gen1_normalized"
+    f"Languages/{LOCAL_LANGUAGE_TITLE}Phrasebook/Results_Audios/{MODE}_gen1_normalized"
 )
 normalized_padded_path = get_asset_path(
-    f"Languages/{local_language_title}Phrasebook/Results_Audios/{MODE}_gen2_normalized_padded"
+    f"Languages/{LOCAL_LANGUAGE_TITLE}Phrasebook/Results_Audios/{MODE}_gen2_normalized_padded"
 )
 bilingual_output_path = get_asset_path(
-    f"Languages/{local_language_title}Phrasebook/Results_Audios/{MODE}_gen3_bilingual_sentences"
+    f"Languages/{LOCAL_LANGUAGE_TITLE}Phrasebook/Results_Audios/{MODE}_gen3_bilingual_sentences"
 )
 
 logging.basicConfig(
@@ -629,7 +629,7 @@ logging.basicConfig(
 if __name__ == "__main__":
         
     global_start = time.perf_counter()
-    prefix = f"{local_language.lower()}_phrasebook_"
+    prefix = f"{LOCAL_LANGUAGE.lower()}_phrasebook_"
     subset_files_now: list[Path] = []
 
     if USE_FILTERING:
@@ -778,38 +778,57 @@ if __name__ == "__main__":
 
         logging.info(f"Step (Merge bilingual): {processed} processed, {skipped} skipped, {failed} failed")
 
-    def concatenate_chapters(bilingual_output_path: Path, chapter_ranges, target_ids: set[int]):
+    def concatenate_chapters(
+    bilingual_output_path: Path,
+    chapter_ranges,
+    target_ids: set[int]
+    ):
+        """Concatenate bilingual files into per-chapter MP3s, respecting START_CHAPTER/END_CHAPTER."""
         combined_chapters_audio_folder = bilingual_output_path / "bilingual_sentences_chapters"
         os.makedirs(combined_chapters_audio_folder, exist_ok=True)
 
         bilingual_files, _ = get_audio(bilingual_output_path, ext=["*.mp3"], check_subfolders=False)
-        bilingual_files = [f for f in bilingual_files if get_digits_numbers_from_string(f.name) in target_ids]
+
+        # ── 🔥 NEW: Restrict to START_CHAPTER–END_CHAPTER if defined ──
+        start_num, end_num = None, None
+        if START_CHAPTER is not None and END_CHAPTER is not None:
+            try:
+                start_num = chapter_ranges[START_CHAPTER - 1][0]
+                end_num   = chapter_ranges[END_CHAPTER - 1][1]
+                print(f"ℹ️  Concatenating only chapters {START_CHAPTER}–{END_CHAPTER} "
+                    f"(sentences {start_num}–{end_num})")
+            except IndexError:
+                print("❌ Invalid chapter range for concatenation.")
+                return
+
+        # Keep only files that are in `target_ids` AND inside the chapter sentence range
+        filtered_files = []
+        for f in bilingual_files:
+            num = get_digits_numbers_from_string(f.name)
+            if num is None:
+                continue
+            if num in target_ids and (start_num is None or (start_num <= num <= end_num)):
+                filtered_files.append(f)
 
         chapter_to_files = defaultdict(list)
-        for f in bilingual_files:
+        for f in filtered_files:
             num = get_digits_numbers_from_string(f.name)
             chap = get_chapter(chapter_ranges, num)
             if chap:
                 chapter_to_files[chap].append(f)
 
         rng = random.Random(SHUFFLE_SEED)
-
         for chap, files in sorted(chapter_to_files.items(), key=lambda x: x[0]):
-            # if MODE == "homework":
-            #     rng.shuffle(files)
-            
-            if SHUFFLE_HOMEWORK and (MODE == "homework"):
+            if SHUFFLE_HOMEWORK and MODE == "homework":
                 rng.shuffle(files)
 
-
             print(f"🎵 Concatenating {len(files)} files for {chap} (shuffle={MODE=='homework'})")
-
             combined = None
             for f in files:
                 seg = AudioSegment.from_file(f)
                 combined = seg if combined is None else combined + seg
 
-            output_path = combined_chapters_audio_folder / f"phrasebook_{local_language}_{chap}.mp3"
+            output_path = combined_chapters_audio_folder / f"phrasebook_{LOCAL_LANGUAGE}_{chap}.mp3"
             combined.export(output_path, format="mp3", bitrate="192k")
             print(f"✅ Exported {output_path.name}")
 

@@ -59,11 +59,11 @@ SHUFFLE_SEED = None             # or an int like 1234 for reproducible shuffle
 # Option 1: Filter by a range of sentence numbers.
 # If both sentence and chapter ranges are set, 
 # the sentence range will be used.
-START_SENTENCE, END_SENTENCE = 14, 14
+START_SENTENCE, END_SENTENCE = 12, 12
 START_SENTENCE, END_SENTENCE = None, None
 
 # Option 2: Filter by a range of chapter numbers.
-START_CHAPTER, END_CHAPTER = 15, 15
+START_CHAPTER, END_CHAPTER = 1, 1
 START_CHAPTER, END_CHAPTER = None, None 
 
 
@@ -102,7 +102,7 @@ MUSIC_VOLUME = 0.1
 
 # ─── Parallelism ───────────────────────────────────
 USE_PARALLEL = True
-MAX_WORKERS = 2
+# MAX_WORKERS = 4
 FFMPEG_THREADS = 2
 
 # Auto-tune parallelism defaults when not provided via environment or explicit config
@@ -110,6 +110,8 @@ try:
     _CPU_COUNT = os.cpu_count() or 1
 except Exception:
     _CPU_COUNT = 1
+
+MAX_WORKERS = _CPU_COUNT // 2
 
 # Allow env override first
 if "MAX_WORKERS" in os.environ:

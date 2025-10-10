@@ -35,10 +35,20 @@ def normalize_audio(input_path: str, suffix: str = "_normalized") -> str:
     except Exception as e:
         print(f"❌ Error with {input_path}: {e}")
         return ""
+#Script Opening Credit
+'''[speaking clearly] This Bamoun Audio Phrasebook was created by Dr. Chamna, and narrated by M. Feefen. 
+[encouraging] Get the physical book on Amazon, and follow along as you listen. 
+This phrasebook is part of the African Languages Series, first written in Nufi and now translated into many African languages. [earnest] Please Support the preservation of our mother tongues by helping Rezulam.
+'''
+#Script END Credit
 
+''' 
+This is the end of this audiobook, but the beginning of your journey into African languages. 
+Please support us in creating more resources like this to help preserve and share Africa's rich linguistic heritage.
+'''
 # ---- Process multiple files ----
 files = [
-    r"C:\Users\tcham\Downloads\IntroDualaElevenLabWhisp.mp3",
+    r"C:\Users\tcham\Downloads\IntroBamounElevenLabWhisp (Bamoun).mp3",
     r"C:\Users\tcham\Downloads\EndCredit_DualaElevenLab.mp3",
     r"C:\Users\tcham\OneDrive\Documents\Camtasia\Ads Phrasebooks Videos duala Resulam.m4a"
 ]
