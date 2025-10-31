@@ -4,6 +4,8 @@
 ![alt text](assets/demo_images/demo_resulam_video_generation_pipeline.jpg)
 
 
+
+
 This Python script is an automated video production pipeline for creating educational language-learning videos. It generates videos with synchronized multi-language text overlays, dynamic background images, and custom branding from audio files and sentence lists. Optimized for the "Guide de conversation trilingue" series, this tool streamlines the creation of engaging content for African languages.
 
 The pipeline consists of modular, independent scripts. Each module can be executed separately, provided the necessary audio, text, and image resources are available.
@@ -42,7 +44,71 @@ Pillow==9.5.0
 
 For streamlined installation, use the provided requirements.txt file:
 `pip install -r requirements.txt`
- 
+
+
+## FFmpeg Installation (Required)
+
+This project relies heavily on FFmpeg for audio and video processing. You must have FFmpeg installed and available in your system PATH for the pipeline to work.
+
+### How to install FFmpeg on Windows
+
+1. Download FFmpeg:
+	- Go to https://www.gyan.dev/ffmpeg/builds/
+	- Download the latest "release full" build (for example `ffmpeg-release-full.7z`).
+2. Extract the archive:
+	- Use 7-Zip (https://www.7-zip.org/) or a similar extractor to unpack the `.7z` file.
+	- Inside the extracted folder find the `bin` directory (it contains `ffmpeg.exe`).
+3. Add FFmpeg to your system PATH:
+	- Copy the full path to the `bin` folder (for example `C:\ffmpeg\bin`).
+	- Open PowerShell as Administrator and run:
+	  ```powershell
+	  $ffmpegPath = 'C:\path\to\ffmpeg\bin'  # change this to your actual path
+	  [Environment]::SetEnvironmentVariable('Path', $env:Path + ";$ffmpegPath", [EnvironmentVariableTarget]::Machine)
+	  ```
+	- Or add the path via Windows Settings → System → About → Advanced system settings → Environment Variables.
+4. Verify installation:
+	- Restart PowerShell and run:
+	  ```powershell
+	  ffmpeg -version
+	  ```
+	- You should see FFmpeg version information printed. If not, re-check the PATH you added.
+
+Important: After updating your PATH, restart Visual Studio Code so the editor and its integrated terminals pick up the new environment.
+
+FFmpeg is required for the audio/video processing steps in this pipeline. If `ffmpeg -version` fails, the scripts that call ffmpeg will raise a FileNotFoundError.
+
+![FFmpeg and ImageMagick diagram](assets/demo_images/ffmpeg_and_ImageMagick.png)
+
+# ImageMagick (Required for text rendering via MoviePy)
+
+MoviePy's `TextClip` uses ImageMagick under the hood to render text into images. If ImageMagick isn't installed or not available on PATH, MoviePy will raise errors like "WinError 2: The system cannot find the file specified" when creating text clips.
+
+### How to install ImageMagick on Windows
+
+1. Install quickly with winget (recommended):
+	```powershell
+	winget install --id ImageMagick.ImageMagick -e
+	```
+	Or with Chocolatey:
+	```powershell
+	choco install imagemagick -y
+	```
+	Or download the installer from https://imagemagick.org and run it.
+2. During installation, enable the option to add ImageMagick to the system PATH. If offered, enable the legacy "convert" utilities only if you need backwards compatibility.
+3. Verify installation in a new PowerShell session:
+	```powershell
+	magick -version
+	convert -version   # optional, only if legacy utilities were installed
+	```
+
+If ImageMagick is installed but MoviePy still fails to find it, you can explicitly tell MoviePy which binary to use by setting the `IMAGEMAGICK_BINARY` config option in your code (example already added to `step2_video_production.py`):
+
+```python
+from moviepy.config import change_settings
+change_settings({"IMAGEMAGICK_BINARY": "magick"})
+```
+
+Important: After installing ImageMagick or changing PATH, restart Visual Studio Code so the editor and its integrated terminals pick up the new environment.
 
 # Step 1: Audio Processing 
 ![Demo audio processing](assets/demo_images/audio_processing.png)
@@ -66,6 +132,8 @@ Organize your files as follows
 - For the audios-videos matching sentences, create `Yoruba_english_french_phrasebook_sentences_list.txt` in **YorubaPhrasebook**, with sentences formatted as: `1) language1 | Language2 | Language3;` e.g., `1) Hello.| Ẹ ǹ lẹ́. | Salut.`
 - Notice that the language separator is |
 - If you only want to display two languages in the Video, then only write 1) language1 | Language2; Example: 6)  I am fine.| Mo wà dáadáa.
+
+**Best Practice:** Duplicate the `assets` folder and rename it to `private_assets`. Place your private audio and text resources inside `private_assets` to keep them separate from public/shared assets. This helps you manage sensitive or proprietary files that should not be distributed with the public repository.
 
 ## Customizable Parameters
 

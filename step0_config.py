@@ -8,7 +8,7 @@ import os
 # Use Private Assets or Normal Assets
 ##############################################################
 LANGUAGE = "Duala"         # e.g., "Duala", "Nufi", "Yoruba"
-LANGUAGE = "Bamoun"         # e.g., "Duala", "Nufi", "Yoruba"
+# LANGUAGE = "Bamoun"         # e.g., "Duala", "Nufi", "Yoruba"
 
 MODE = "homework"          # "lecture" or "homework"
 ENV = "production"         # "production" or "test"
