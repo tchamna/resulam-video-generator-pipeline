@@ -1,23 +1,88 @@
 
 from __future__ import annotations
 import os
+import time
+import logging
+from contextlib import contextmanager
+
 import shutil
 import threading
 from pathlib import Path
 from uuid import uuid4
 from typing import List, Dict
-from PIL import Image, ImageFile
+
+from PIL import Image, ImageFile, ImageDraw, ImageFont, ImageColor
+import numpy as np
 from moviepy.editor import (
     AudioFileClip, CompositeAudioClip, CompositeVideoClip,
     ImageClip, TextClip,
 )
 
-
-import time
-import logging
-from contextlib import contextmanager
-
 import step0_config as cfg
+
+# Ensure MoviePy knows which ImageMagick binary to use on Windows.
+# Try to find the 'magick' executable automatically (shutil.which and
+# common Program Files locations). If found, set MoviePy's IMAGEMAGICK_BINARY
+# to the absolute path so TextClip can call it without WinError 2.
+try:
+    from moviepy.config import change_settings
+except Exception:
+    change_settings = None
+
+def find_imagemagick_binary() -> str | None:
+    """Return an absolute path to ImageMagick 'magick' binary or None.
+
+    Strategy:
+      1. shutil.which('magick')
+      2. Search under Program Files and Program Files (x86) for magick.exe
+      3. Inspect PATH entries for magick.exe
+    """
+    import shutil
+    from pathlib import Path
+    import os
+
+    # 1) which
+    exe = shutil.which("magick")
+    if exe:
+        return exe
+
+    # 2) search common install locations
+    program_dirs = [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")]
+    program_dirs = [p for p in program_dirs if p]
+    tried = set()
+    for base in program_dirs:
+        base_path = Path(base)
+        if not base_path.exists():
+            continue
+        # look for magick.exe in any subdirectory (ImageMagick installs with versioned folder)
+        for p in base_path.rglob("magick.exe"):
+            if p.exists():
+                return str(p.resolve())
+        tried.add(str(base_path))
+
+    # 3) PATH entries
+    for p in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = Path(p) / "magick.exe"
+        if candidate.exists():
+            return str(candidate.resolve())
+
+    return None
+
+
+IMAGEMAGICK_BIN = find_imagemagick_binary()
+if IMAGEMAGICK_BIN and change_settings is not None:
+    try:
+        change_settings({"IMAGEMAGICK_BINARY": IMAGEMAGICK_BIN})
+        logging.info(f"Using ImageMagick binary: {IMAGEMAGICK_BIN}")
+    except Exception:
+        logging.warning("Could not set MoviePy IMAGEMAGICK_BINARY via change_settings; TextClip may still fail.")
+elif IMAGEMAGICK_BIN:
+    logging.info(f"Found ImageMagick binary at {IMAGEMAGICK_BIN}, but moviepy.config.change_settings is unavailable.")
+else:
+    logging.warning(
+        "ImageMagick 'magick' not found on PATH or common Program Files locations. "
+        "If you see WinError 2 when TextClip runs, install ImageMagick or set the full path in your environment."
+    )
 
 
 
