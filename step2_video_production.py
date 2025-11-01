@@ -22,69 +22,6 @@ import step0_config as cfg
 
 from moviepy.config import change_settings
 
-# Disable ImageMagick permanently — force Pillow (FreeType) backend
-try:
-    change_settings({"IMAGEMAGICK_BINARY": None})
-except Exception as e:
-    print(f"⚠️ Could not disable ImageMagick explicitly: {e}")
-
-def find_imagemagick_binary() -> str | None:
-    """Return an absolute path to ImageMagick 'magick' binary or None.
-
-    Strategy:
-      1. shutil.which('magick')
-      2. Search under Program Files and Program Files (x86) for magick.exe
-      3. Inspect PATH entries for magick.exe
-    """
-    import shutil
-    from pathlib import Path
-    import os
-
-    # 1) which
-    exe = shutil.which("magick")
-    if exe:
-        return exe
-
-    # 2) search common install locations
-    program_dirs = [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")]
-    program_dirs = [p for p in program_dirs if p]
-    tried = set()
-    for base in program_dirs:
-        base_path = Path(base)
-        if not base_path.exists():
-            continue
-        # look for magick.exe in any subdirectory (ImageMagick installs with versioned folder)
-        for p in base_path.rglob("magick.exe"):
-            if p.exists():
-                return str(p.resolve())
-        tried.add(str(base_path))
-
-    # 3) PATH entries
-    for p in os.environ.get("PATH", "").split(os.pathsep):
-        candidate = Path(p) / "magick.exe"
-        if candidate.exists():
-            return str(candidate.resolve())
-
-    return None
-
-
-IMAGEMAGICK_BIN = find_imagemagick_binary()
-if IMAGEMAGICK_BIN and change_settings is not None:
-    try:
-        change_settings({"IMAGEMAGICK_BINARY": IMAGEMAGICK_BIN})
-        logging.info(f"Using ImageMagick binary: {IMAGEMAGICK_BIN}")
-    except Exception:
-        logging.warning("Could not set MoviePy IMAGEMAGICK_BINARY via change_settings; TextClip may still fail.")
-elif IMAGEMAGICK_BIN:
-    logging.info(f"Found ImageMagick binary at {IMAGEMAGICK_BIN}, but moviepy.config.change_settings is unavailable.")
-else:
-    logging.warning(
-        "ImageMagick 'magick' not found on PATH or common Program Files locations. "
-        "If you see WinError 2 when TextClip runs, install ImageMagick or set the full path in your environment."
-    )
-
-
-
 # # ─── Asset Source Config ──────────────────────────────
 # USE_PRIVATE_ASSETS = True   # switch here: True → private_assets, False → normal assets
 # USE_PRIVATE_ASSETS = False   # switch here: True → private_assets, False → normal assets
@@ -535,7 +472,15 @@ def render_all_sentences(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def worker(sentence: Dict):
-        create_video_clip(sentence)
+        try:
+            create_video_clip(sentence)
+        except Exception as e:
+            # Include sentence id in the error log and print traceback for debugging
+            logging.error(f"❌ Error rendering sentence {sentence.get('id')}: {e}")
+            import traceback as _tb
+            _tb.print_exc()
+            # Re-raise so the caller can observe the failure if needed
+            raise
 
     # --- Option A: sentence range ---
     if start_sentence is not None or end_sentence is not None:

@@ -82,6 +82,7 @@ DEFAULT_INTRO = "Listen, repeat and translate:"
 # Optional path overrides
 # FONT_PATH = "Fonts/arialbd.ttf"
 FONT_PATH = "Fonts/CharisSIL-B.ttf"
+FONT_PATH = BASE_DIR / "assets" / "Fonts" / "CharisSIL-B.ttf"
 
 LOGO_PATH = "resulam_logo_resurrectionLangue.png"
 LOG_DIR = f"Languages/{LANGUAGE}Phrasebook/Logs"
