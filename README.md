@@ -79,11 +79,22 @@ FFmpeg is required for the audio/video processing steps in this pipeline. If `ff
 
 ![FFmpeg and ImageMagick diagram](assets/demo_images/ffmpeg_and_ImageMagick.png)
 
-# ImageMagick (Required for text rendering via MoviePy)
+# Image rendering backend (ImageMagick vs Pillow)
 
-MoviePy's `TextClip` uses ImageMagick under the hood to render text into images. If ImageMagick isn't installed or not available on PATH, MoviePy will raise errors like "WinError 2: The system cannot find the file specified" when creating text clips.
+Historically MoviePy's `TextClip` used ImageMagick to rasterize text. That required a working ImageMagick install on PATH and could raise errors like "WinError 2" when the binary wasn't found.
 
-### How to install ImageMagick on Windows
+This repository's video production script (`step2_video_production.py`) is configured to avoid that dependency by default: it explicitly disables ImageMagick and forces MoviePy to use Pillow / FreeType for text rendering where possible. Concretely, `step2_video_production.py` calls:
+
+```python
+from moviepy.config import change_settings
+change_settings({"IMAGEMAGICK_BINARY": None})
+```
+
+What this means for you:
+- You do NOT need to install ImageMagick just to run `step2_video_production.py` in the typical pipeline flow — the script will prefer Pillow/FreeType and will also fall back to in-repo rasterization for some labels using the bundled Charis TTF.
+- If you run other scripts that still call `TextClip` with ImageMagick-specific features, or if you explicitly override settings, ImageMagick may still be required.
+
+If you prefer to install ImageMagick system-wide (optional):
 
 1. Install quickly with winget (recommended):
 	```powershell
@@ -94,14 +105,13 @@ MoviePy's `TextClip` uses ImageMagick under the hood to render text into images.
 	choco install imagemagick -y
 	```
 	Or download the installer from https://imagemagick.org and run it.
-2. During installation, enable the option to add ImageMagick to the system PATH. If offered, enable the legacy "convert" utilities only if you need backwards compatibility.
+2. During installation, enable the option to add ImageMagick to the system PATH if prompted.
 3. Verify installation in a new PowerShell session:
 	```powershell
 	magick -version
-	convert -version   # optional, only if legacy utilities were installed
 	```
 
-If ImageMagick is installed but MoviePy still fails to find it, you can explicitly tell MoviePy which binary to use by setting the `IMAGEMAGICK_BINARY` config option in your code (example already added to `step2_video_production.py`):
+If you install ImageMagick but MoviePy still can't find it, you can explicitly tell MoviePy which binary to use:
 
 ```python
 from moviepy.config import change_settings

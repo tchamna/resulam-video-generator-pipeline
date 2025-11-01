@@ -20,14 +20,13 @@ from moviepy.editor import (
 
 import step0_config as cfg
 
-# Ensure MoviePy knows which ImageMagick binary to use on Windows.
-# Try to find the 'magick' executable automatically (shutil.which and
-# common Program Files locations). If found, set MoviePy's IMAGEMAGICK_BINARY
-# to the absolute path so TextClip can call it without WinError 2.
+from moviepy.config import change_settings
+
+# Disable ImageMagick permanently — force Pillow (FreeType) backend
 try:
-    from moviepy.config import change_settings
-except Exception:
-    change_settings = None
+    change_settings({"IMAGEMAGICK_BINARY": None})
+except Exception as e:
+    print(f"⚠️ Could not disable ImageMagick explicitly: {e}")
 
 def find_imagemagick_binary() -> str | None:
     """Return an absolute path to ImageMagick 'magick' binary or None.
