@@ -3,6 +3,21 @@ import sys
 from pathlib import Path
 import os
 
+
+def _configure_stdio_utf8() -> None:
+    # Avoid UnicodeEncodeError on Windows consoles when scripts print emojis/symbols.
+    for stream in (getattr(sys, "stdout", None), getattr(sys, "stderr", None)):
+        if stream is None:
+            continue
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_stdio_utf8()
+
 # List of step scripts in order
 steps = [
     "step1_audio_processing.py",

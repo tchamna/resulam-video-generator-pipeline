@@ -1,8 +1,10 @@
 
 from __future__ import annotations
 import os
+import sys
 import time
 import logging
+import subprocess
 from contextlib import contextmanager
 
 import shutil
@@ -21,6 +23,21 @@ from moviepy.editor import (
 import step0_config as cfg
 
 from moviepy.config import change_settings
+
+
+def _configure_stdio_utf8() -> None:
+    # Avoid UnicodeEncodeError on Windows consoles (can crash mid-ffmpeg and corrupt MP4s).
+    for stream in (getattr(sys, "stdout", None), getattr(sys, "stderr", None)):
+        if stream is None:
+            continue
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_stdio_utf8()
 
 # Text rendering backend:
 # - Default: disable ImageMagick so we consistently use the bundled TTF fonts (Charis SIL)
@@ -70,6 +87,18 @@ USE_PRIVATE_ASSETS = os.getenv("USE_PRIVATE_ASSETS", "1"
 LANGUAGE = cfg.LANGUAGE.title()
 MODE = cfg.MODE.lower()              # "lecture" | "homework"
 REBUILD_ALL = bool(getattr(cfg, "REBUILD_ALL", False))
+_env_rebuild = os.getenv("REBUILD_ALL", os.getenv("FORCE_REBUILD"))
+if _env_rebuild is not None:
+    REBUILD_ALL = str(_env_rebuild).strip().lower() not in ("0", "false", "no", "off", "")
+
+# Audio sample rate for MP4 outputs (Windows Media Player tends to be happiest with 48kHz).
+AUDIO_SAMPLE_RATE = int(getattr(cfg, "AUDIO_SAMPLE_RATE", 48000))
+
+# Optional post-process remux to improve compatibility with Windows Media Player.
+POSTPROCESS_MP4 = bool(getattr(cfg, "POSTPROCESS_MP4", True))
+_env_post = os.getenv("POSTPROCESS_MP4")
+if _env_post is not None:
+    POSTPROCESS_MP4 = str(_env_post).strip().lower() not in ("0", "false", "no", "off", "")
 
 # ── PARALLELISM CONFIG ──────────────────────────────────────────────────
 # FFMPEG_THREADS = 4
@@ -573,6 +602,9 @@ def create_video_clip(sentence: Dict):
         # audio.fps = 44100 
         # audio.preview()   # plays in real time using pygame
 
+    # Ensure audio spans the full video duration (pads with silence at the end).
+    audio = audio.set_duration(total_duration)
+
     # --- Font & spacing ---
     font_size = calculate_font_size(sentence)
     y_position_lecture = 120
@@ -699,19 +731,93 @@ def create_video_clip(sentence: Dict):
     # --- Render ---
     temp_audio_file = f"temp_audio_{uuid4().hex}.m4a"
     temp_video_file = output_path.with_suffix(".tmp.mp4")
+    final = None
     try:
-        CompositeVideoClip(clips).set_audio(audio).write_videofile(
+        final = CompositeVideoClip(clips).set_audio(audio)
+        final.write_videofile(
             str(temp_video_file), fps=FRAME_RATE, codec="libx264", audio_codec="aac",
             temp_audiofile=temp_audio_file, remove_temp=True,
-            ffmpeg_params=["-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1", "-movflags", "+faststart"],
+            audio_bitrate="192k", audio_fps=AUDIO_SAMPLE_RATE,
+            ffmpeg_params=[
+                "-pix_fmt", "yuv420p",
+                "-profile:v", "high",
+                "-level", "4.1",
+                "-movflags", "+faststart",
+            ],
             preset=str(getattr(cfg, "X264_PRESET", "superfast")), threads=FFMPEG_THREADS,
         )
-        shutil.move(temp_video_file, output_path)
+
+        # Close MoviePy objects before remux/rename on Windows.
+        try:
+            final.close()
+        except Exception:
+            pass
+        final = None
+
+        # Optional remux step (copy video, re-encode audio) to maximize WMP compatibility.
+        if POSTPROCESS_MP4 and shutil.which("ffmpeg"):
+            temp_muxed_file = output_path.with_suffix(".mux.mp4")
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(temp_video_file),
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ar", str(AUDIO_SAMPLE_RATE),
+                "-ac", "2",
+                "-movflags", "+faststart",
+                "-brand", "mp42",
+                str(temp_muxed_file),
+            ]
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if proc.returncode == 0 and temp_muxed_file.exists():
+                temp_video_file.unlink(missing_ok=True)
+                temp_video_file = temp_muxed_file
+            else:
+                try:
+                    temp_muxed_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        # Give the OS a moment to release file handles on Windows before rename.
+        for attempt in range(6):
+            try:
+                time.sleep(0.15 * attempt)
+                temp_video_file.replace(output_path)
+                break
+            except PermissionError:
+                if attempt == 5:
+                    raise
+
         print(f"✅ Rendered: {output_path.name}")
     except Exception as error:
         print(f"❌ Error rendering sentence {sentence['id']}: {error}")
         Path(temp_audio_file).unlink(missing_ok=True)
         Path(temp_video_file).unlink(missing_ok=True)
+    finally:
+        try:
+            if final is not None:
+                final.close()
+        except Exception:
+            pass
+        try:
+            audio.close()
+        except Exception:
+            pass
+        try:
+            local_audio.close()
+        except Exception:
+            pass
+        try:
+            english_audio.close()
+        except Exception:
+            pass
+        for c in clips:
+            try:
+                if hasattr(c, "close"):
+                    c.close()
+            except Exception:
+                pass
 
 
 # ── MULTI-THREAD RENDERING ──────────────────────────────────────────────
@@ -769,6 +875,24 @@ def render_all_sentences(
         if not selected:
             print(f"⚠ No sentences found in range {start_sentence}–{end_sentence}. Nothing to render.")
             return
+
+        # Non-destructive warning: old clips outside the requested range can confuse later steps.
+        try:
+            import re as _re
+            existing_ids: list[int] = []
+            for p in VIDEO_OUT_DIR.glob(f"{LANGUAGE.lower()}_sentence_*.mp4"):
+                m = _re.search(r"(?:^|_)sentence_(\d+)$", p.stem, _re.IGNORECASE)
+                if not m:
+                    continue
+                existing_ids.append(int(m.group(1)))
+            outside = sorted({i for i in existing_ids if i < start_sentence or i > end_sentence})
+            if outside:
+                print(
+                    f"⚠ Output folder already has {len(outside)} clip(s) outside {start_sentence}–{end_sentence} "
+                    f"(e.g. {outside[:10]}). Step 3/5 may include them unless you filter chapters or clean old outputs."
+                )
+        except Exception:
+            pass
 
         print(f"▶ Rendering {len(selected)} sentence(s) in range {start_sentence}–{end_sentence}…")
         with ThreadPoolExecutor(max_workers=MAX_PARALLEL_JOBS) as ex:
@@ -829,10 +953,37 @@ if __name__ == "__main__":
     # start_sentence, end_sentence=1638, 1638
     # start_sentence, end_sentence=None, None
     
-    start_chapter = getattr(cfg, "START_CHAPTER", None)
-    end_chapter   = getattr(cfg, "END_CHAPTER", None)
-    start_sentence = getattr(cfg, "START_SENTENCE", None)
-    end_sentence   = getattr(cfg, "END_SENTENCE", None)
+    def _maybe_int(v):
+        if v is None or v == "":
+            return None
+        try:
+            return int(v)
+        except Exception:
+            return None
+
+    start_chapter = _maybe_int(getattr(cfg, "START_CHAPTER", None))
+    end_chapter = _maybe_int(getattr(cfg, "END_CHAPTER", None))
+    start_sentence = _maybe_int(getattr(cfg, "START_SENTENCE", None))
+    end_sentence = _maybe_int(getattr(cfg, "END_SENTENCE", None))
+
+    # Optional env override (useful when running step0_main_pipeline from different configs)
+    env_start_sentence = os.getenv("START_SENTENCE") or os.getenv("START_ID")
+    env_end_sentence = os.getenv("END_SENTENCE") or os.getenv("END_ID")
+    if env_start_sentence is not None or env_end_sentence is not None:
+        env_start_sentence_i = _maybe_int(env_start_sentence)
+        env_end_sentence_i = _maybe_int(env_end_sentence)
+        if env_start_sentence_i is None or env_end_sentence_i is None:
+            logging.warning(
+                "START_SENTENCE/END_SENTENCE env override ignored: both must be set to integers."
+            )
+        else:
+            start_sentence, end_sentence = env_start_sentence_i, env_end_sentence_i
+
+    logging.info(
+        f"Filters: START_SENTENCE={start_sentence} END_SENTENCE={end_sentence} "
+        f"START_CHAPTER={start_chapter} END_CHAPTER={end_chapter} "
+        f"(cfg={getattr(cfg, '__file__', '?')}, cwd={Path.cwd()})"
+    )
 
 
     

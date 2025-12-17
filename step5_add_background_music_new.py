@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, time, re, logging, subprocess
+import os, time, re, logging, subprocess, sys
 from pathlib import Path
 from natsort import natsorted
 from contextlib import contextmanager
@@ -7,6 +7,21 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydub import AudioSegment
 
 import step0_config as cfg
+
+
+def _configure_stdio_utf8() -> None:
+    # Avoid UnicodeEncodeError on Windows consoles when scripts print emojis/symbols.
+    for stream in (getattr(sys, "stdout", None), getattr(sys, "stderr", None)):
+        if stream is None:
+            continue
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_stdio_utf8()
 
 # ── USER SETTINGS ──────────────────────────────────────────────────────
 BASE_DIR        = cfg.BASE_DIR
@@ -167,6 +182,11 @@ def add_bg_music_to_video(normalized_video: Path, music_file: Path, out_dir: Pat
         "-i", str(normalized_video),
         "-i", str(temp_mixed),
         "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-ac", "2",
+        "-movflags", "+faststart",
         "-map", "0:v:0",
         "-map", "1:a:0",
         "-shortest",
@@ -175,8 +195,12 @@ def add_bg_music_to_video(normalized_video: Path, music_file: Path, out_dir: Pat
     if FFMPEG_THREADS:
         cmd.insert(-1, "-threads")
         cmd.insert(-1, str(FFMPEG_THREADS))
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    temp_mixed.unlink(missing_ok=True)
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed for {normalized_video.name}: {proc.stderr[-2000:]}")
+    finally:
+        temp_mixed.unlink(missing_ok=True)
     return out_file
 
 def add_bg_music_to_audio(normalized_audio: Path, music_file: Path, out_dir: Path, music_gain_db=-25.0) -> Path:

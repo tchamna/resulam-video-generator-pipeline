@@ -7,10 +7,10 @@ import os
 # Set Language, Mode, Env
 # Use Private Assets or Normal Assets
 ##############################################################
-LANGUAGE = "Duala"         # e.g., "Duala", "Nufi", "Yoruba"
+LANGUAGE = "Ewondo"         # e.g., "Duala", "Nufi", "Yoruba", "Ewondo"
 # LANGUAGE = "Bamoun"         # e.g., "Duala", "Nufi", "Yoruba"
 
-MODE = "homework"          # "lecture" or "homework"
+# MODE = "homework"          # "lecture" or "homework"
 ENV = "production"         # "production" or "test"
 
 MODE = "lecture"          # "lecture" or "homework"
@@ -56,15 +56,23 @@ SHUFFLE_SEED = None             # or an int like 1234 for reproducible shuffle
 
 
 # Filtering (None = process all)
-# Option 1: Filter by a range of sentence numbers.
-# If both sentence and chapter ranges are set, 
-# the sentence range will be used.
-START_SENTENCE, END_SENTENCE = 12, 12
+# If both sentence and chapter ranges are set, the sentence range is used.
+#
+# Option 1: Filter by a range of sentence IDs (inclusive).
+# IMPORTANT: keep only ONE of the `START_SENTENCE, END_SENTENCE = ...` lines uncommented.
 START_SENTENCE, END_SENTENCE = None, None
+# START_SENTENCE, END_SENTENCE = 1, 5
+#
+# Option 2: Filter by a range of chapters (inclusive).
+# IMPORTANT: keep only ONE of the `START_CHAPTER, END_CHAPTER = ...` lines uncommented.
+START_CHAPTER, END_CHAPTER = None, None
+# START_CHAPTER, END_CHAPTER = 1, 1
 
-# Option 2: Filter by a range of chapter numbers.
-START_CHAPTER, END_CHAPTER = 1, 1
-START_CHAPTER, END_CHAPTER = None, None 
+# Backward-compatible aliases used by older scripts
+FILTER_SENTENCE_START = START_SENTENCE
+FILTER_SENTENCE_END   = END_SENTENCE
+START_ID = START_SENTENCE
+END_ID   = END_SENTENCE
 
 
 # Step 2: Video Production settings
@@ -81,7 +89,6 @@ DEFAULT_INTRO = "Listen, repeat and translate:"
 
 # Optional path overrides
 # FONT_PATH = "Fonts/arialbd.ttf"
-FONT_PATH = "Fonts/CharisSIL-B.ttf"
 FONT_PATH = BASE_DIR / "assets" / "Fonts" / "CharisSIL-B.ttf"
 
 LOGO_PATH = "resulam_logo_resurrectionLangue.png"
@@ -93,6 +100,11 @@ VIDEO_RESOLUTION = (1920, 1080)
 FRAME_RATE = 24
 # TRAILING_PAUSE_DURATION = 3
 DEFAULT_FONT_SIZE = 100
+
+# Step 2: Encoding knobs (Windows Media Player compatibility)
+REBUILD_ALL = False
+POSTPROCESS_MP4 = True
+AUDIO_SAMPLE_RATE = 48000
 
 # ─── Combining Videos ─────────────────────────────────────
 CHUNK_SIZE = 10

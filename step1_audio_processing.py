@@ -6,6 +6,7 @@ import subprocess
 import re
 import time
 import logging
+import sys
 from pathlib import Path
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
@@ -25,6 +26,21 @@ from collections import defaultdict
 
 # ─── Central config ─────────────────────────────────────────────────────
 import step0_config as cfg
+
+
+def _configure_stdio_utf8() -> None:
+    # Avoid UnicodeEncodeError on Windows consoles when scripts print emojis/symbols.
+    for stream in (getattr(sys, "stdout", None), getattr(sys, "stderr", None)):
+        if stream is None:
+            continue
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_stdio_utf8()
 
 
 MODE = cfg.MODE.lower()                      # "lecture" | "homework"
@@ -60,8 +76,16 @@ TRAILING_PAUSE_DURATION = float(getattr(cfg, "TRAILING_PAUSE_DURATION", 1))
 REPEAT_LOCAL_AUDIO        = int(getattr(cfg, "REPEAT_LOCAL_AUDIO", 1))
 FLAG_PAD                  = bool(getattr(cfg, "FLAG_PAD", True))
 
-FILTER_SENTENCE_START = getattr(cfg, "FILTER_SENTENCE_START", None)
-FILTER_SENTENCE_END   = getattr(cfg, "FILTER_SENTENCE_END", None)
+# Sentence filtering (canonical names in cfg: START_SENTENCE/END_SENTENCE).
+# Back-compat: FILTER_SENTENCE_START/FILTER_SENTENCE_END are still accepted.
+_cfg_start_sentence = getattr(cfg, "START_SENTENCE", None)
+_cfg_end_sentence   = getattr(cfg, "END_SENTENCE", None)
+if _cfg_start_sentence is None and _cfg_end_sentence is None:
+    _cfg_start_sentence = getattr(cfg, "FILTER_SENTENCE_START", None)
+    _cfg_end_sentence   = getattr(cfg, "FILTER_SENTENCE_END", None)
+
+FILTER_SENTENCE_START = _cfg_start_sentence
+FILTER_SENTENCE_END   = _cfg_end_sentence
 START_CHAPTER  = getattr(cfg, "START_CHAPTER", None)
 END_CHAPTER    = getattr(cfg, "END_CHAPTER", None)
 

@@ -23,6 +23,7 @@ Tested with MoviePy 1.x. For MoviePy 2.x, update the import line as noted.
 
 from __future__ import annotations
 import os, random, re, time
+import sys
 from pathlib import Path
 from typing import List, Dict, Iterable
 from moviepy.editor import VideoFileClip, concatenate_videoclips
@@ -31,6 +32,21 @@ import logging
 from contextlib import contextmanager
 
 import step0_config as cfg
+
+
+def _configure_stdio_utf8() -> None:
+    # Avoid UnicodeEncodeError on Windows consoles when scripts print emojis/symbols.
+    for stream in (getattr(sys, "stdout", None), getattr(sys, "stderr", None)):
+        if stream is None:
+            continue
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_stdio_utf8()
 
 
 # from moviepy import VideoFileClip, concatenate_videoclips  # ← for MoviePy 2.x
@@ -201,6 +217,7 @@ def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path]) -> None:
     try:
         final.write_videofile(
             str(tmp_file), fps=FPS, codec="libx264", audio_codec="aac",
+            audio_bitrate="192k", audio_fps=48000,
             threads=FFMPEG_THREADS_PER_JOB,
             ffmpeg_params=["-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1", "-movflags", "+faststart"],
             preset=str(getattr(cfg, "X264_PRESET", "superfast")), logger=None,

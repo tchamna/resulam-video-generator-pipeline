@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, time, re, math, logging, subprocess
+import os, time, re, math, logging, subprocess, sys
 from pathlib import Path
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -9,6 +9,21 @@ import pandas as pd
 from pydub import AudioSegment
 
 import step0_config as cfg
+
+
+def _configure_stdio_utf8() -> None:
+    # Avoid UnicodeEncodeError on Windows consoles when scripts print emojis/symbols.
+    for stream in (getattr(sys, "stdout", None), getattr(sys, "stderr", None)):
+        if stream is None:
+            continue
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_stdio_utf8()
 
 # ── USER SETTINGS ──────────────────────────────────────────────────────
 BASE_DIR        = cfg.BASE_DIR
@@ -120,6 +135,11 @@ def normalize_video_audio(
         "-i", str(video_path),
         "-i", str(temp),
         "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-ac", "2",
+        "-movflags", "+faststart",
         "-map", "0:v:0",
         "-map", "1:a:0",
         "-shortest",
@@ -130,7 +150,9 @@ def normalize_video_audio(
         cmd.insert(-1, str(FFMPEG_THREADS))
 
     logging.info(f"🎧 Normalizing {video_path.name} → {out.name}")
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed for {video_path.name}: {proc.stderr[-2000:]}")
     temp.unlink(missing_ok=True)
     return out
 

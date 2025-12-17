@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import logging
+import sys
 from pathlib import Path
 import re
 import subprocess
@@ -21,6 +22,21 @@ from pydub import AudioSegment, silence
 from pydub.silence import detect_nonsilent
 from collections import defaultdict
 import step0_config as cfg
+
+
+def _configure_stdio_utf8() -> None:
+    # Avoid UnicodeEncodeError on Windows consoles when scripts print emojis/symbols.
+    for stream in (getattr(sys, "stdout", None), getattr(sys, "stderr", None)):
+        if stream is None:
+            continue
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_stdio_utf8()
 
 
 USE_PRIVATE_ASSETS = os.getenv(
@@ -876,8 +892,20 @@ if __name__ == "__main__":
         logging.error(f"No source audio files found in {source_dir}")
     else:
         # Optional filtering for quicker test runs
-        start_id = os.getenv("START_ID", getattr(cfg, "START_ID", None))
-        end_id = os.getenv("END_ID", getattr(cfg, "END_ID", None))
+        # Canonical config names: START_SENTENCE/END_SENTENCE (also used by step2_video_production).
+        # Back-compat: START_ID/END_ID env/cfg names are still accepted.
+        start_id = (
+            os.getenv("START_SENTENCE")
+            or os.getenv("START_ID")
+            or getattr(cfg, "START_SENTENCE", None)
+            or getattr(cfg, "START_ID", None)
+        )
+        end_id = (
+            os.getenv("END_SENTENCE")
+            or os.getenv("END_ID")
+            or getattr(cfg, "END_SENTENCE", None)
+            or getattr(cfg, "END_ID", None)
+        )
         try:
             start_id = int(start_id) if start_id not in (None, "") else None
         except Exception:
