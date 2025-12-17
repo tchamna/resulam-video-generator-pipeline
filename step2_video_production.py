@@ -704,7 +704,7 @@ def create_video_clip(sentence: Dict):
             str(temp_video_file), fps=FRAME_RATE, codec="libx264", audio_codec="aac",
             temp_audiofile=temp_audio_file, remove_temp=True,
             ffmpeg_params=["-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1", "-movflags", "+faststart"],
-            preset="ultrafast", threads=FFMPEG_THREADS,
+            preset=str(getattr(cfg, "X264_PRESET", "superfast")), threads=FFMPEG_THREADS,
         )
         shutil.move(temp_video_file, output_path)
         print(f"✅ Rendered: {output_path.name}")

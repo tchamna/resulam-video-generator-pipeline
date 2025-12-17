@@ -202,8 +202,8 @@ def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path]) -> None:
         final.write_videofile(
             str(tmp_file), fps=FPS, codec="libx264", audio_codec="aac",
             threads=FFMPEG_THREADS_PER_JOB,
-            ffmpeg_params=["-pix_fmt", "yuv420p", "-movflags", "+faststart"],
-            preset="ultrafast", logger=None,
+            ffmpeg_params=["-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1", "-movflags", "+faststart"],
+            preset=str(getattr(cfg, "X264_PRESET", "superfast")), logger=None,
         )
         time.sleep(0.5)  # allow FFmpeg to release file lock
         tmp_file.replace(out_file)
