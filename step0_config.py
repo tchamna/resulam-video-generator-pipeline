@@ -61,12 +61,59 @@ SHUFFLE_SEED = None             # or an int like 1234 for reproducible shuffle
 # Option 1: Filter by a range of sentence IDs (inclusive).
 # IMPORTANT: keep only ONE of the `START_SENTENCE, END_SENTENCE = ...` lines uncommented.
 START_SENTENCE, END_SENTENCE = None, None
-# START_SENTENCE, END_SENTENCE = 1, 5
+# START_SENTENCE, END_SENTENCE = 10, 23
+#
+# Option 1b: Filter by an explicit (non-contiguous) set of IDs.
+# Examples: "1-11,23" or "5,7,9-12"
+SENTENCE_ID_SPEC = None
+# SENTENCE_ID_SPEC = "1-11,23"
+SENTENCE_IDS = None  # e.g. [1,2,3,23]
 #
 # Option 2: Filter by a range of chapters (inclusive).
 # IMPORTANT: keep only ONE of the `START_CHAPTER, END_CHAPTER = ...` lines uncommented.
 START_CHAPTER, END_CHAPTER = None, None
 # START_CHAPTER, END_CHAPTER = 1, 1
+
+# Resolve an optional selected-ID set (used by steps to strictly restrict work).
+def _parse_sentence_id_spec(spec: str) -> set[int]:
+    import re
+
+    out: set[int] = set()
+    spec = (spec or "").strip()
+    if not spec:
+        return out
+
+    for raw in re.split(r"[,\s]+", spec):
+        tok = raw.strip()
+        if not tok:
+            continue
+        if "-" in tok:
+            a, b = tok.split("-", 1)
+            try:
+                lo = int(a.strip())
+                hi = int(b.strip())
+            except Exception:
+                continue
+            if lo > hi:
+                lo, hi = hi, lo
+            for i in range(lo, hi + 1):
+                out.add(i)
+        else:
+            try:
+                out.add(int(tok))
+            except Exception:
+                continue
+    return out
+
+
+_env_spec = os.getenv("SENTENCE_ID_SPEC")
+_spec = _env_spec if _env_spec is not None else SENTENCE_ID_SPEC
+if SENTENCE_IDS:
+    SELECTED_SENTENCE_IDS = {int(x) for x in SENTENCE_IDS}
+elif _spec:
+    SELECTED_SENTENCE_IDS = _parse_sentence_id_spec(str(_spec))
+else:
+    SELECTED_SENTENCE_IDS = None
 
 # Backward-compatible aliases used by older scripts
 FILTER_SENTENCE_START = START_SENTENCE

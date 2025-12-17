@@ -131,14 +131,31 @@ def extract_audios_and_move_original(base_path: Path, ext: str = ".mp3"):
     os.makedirs(original_dir, exist_ok=True)
     subdirs_to_move = []
 
+    selected_ids = getattr(cfg, "SELECTED_SENTENCE_IDS", None)
+    range_lo = FILTER_SENTENCE_START if FILTER_SENTENCE_START is not None and FILTER_SENTENCE_END is not None else None
+    range_hi = FILTER_SENTENCE_END if FILTER_SENTENCE_START is not None and FILTER_SENTENCE_END is not None else None
+    strict_filtering = bool(selected_ids) or (range_lo is not None and range_hi is not None)
+
     for root, _, files in os.walk(base_path):
         root_path = Path(root)
+        # We only flatten audio from subfolders into base_path; don't iterate base_path itself.
+        if root_path == base_path:
+            continue
         if root_path == original_dir or original_dir in root_path.parents:
             continue
 
         has_audio = False
         for f in files:
             if f.endswith(ext):
+                if strict_filtering:
+                    num = get_digits_numbers_from_string(f)
+                    if num is None:
+                        continue
+                    if selected_ids and num not in selected_ids:
+                        continue
+                    if range_lo is not None and range_hi is not None and not (int(range_lo) <= int(num) <= int(range_hi)):
+                        continue
+
                 has_audio = True
                 src = root_path / f
                 dest = base_path / f
@@ -147,25 +164,27 @@ def extract_audios_and_move_original(base_path: Path, ext: str = ".mp3"):
                         shutil.copy(src, dest)
                         audio_files.append(dest)
                     else:
-                        print(f"⚠️ Skipped '{src.name}' (same dest).")
+                        pass
                 except Exception as e:
                     print(f"❌ Copy error {src.name}: {e}")
 
-        if not has_audio:
+        if not has_audio and not strict_filtering:
             print(f"⚠️ Skipped '{root_path.name}': No *{ext} files.")
 
-        if root_path != base_path and root_path.parent == base_path:
+        if not strict_filtering and root_path != base_path and root_path.parent == base_path:
             subdirs_to_move.append(root_path)
 
-    for subdir in subdirs_to_move:
-        if subdir.name != "original_audios":
-            try:
-                shutil.move(str(subdir), original_dir / subdir.name)
-            except Exception as e:
-                print(f"❌ Move error '{subdir}': {e}")
+    if not strict_filtering:
+        for subdir in subdirs_to_move:
+            if subdir.name != "original_audios":
+                try:
+                    shutil.move(str(subdir), original_dir / subdir.name)
+                except Exception as e:
+                    print(f"❌ Move error '{subdir}': {e}")
 
     print(f"✅ Extracted {len(audio_files)} to {base_path}")
-    print(f"📁 Moved {len(subdirs_to_move)} subdirs to '{original_dir.name}'")
+    if not strict_filtering:
+        print(f"📁 Moved {len(subdirs_to_move)} subdirs to '{original_dir.name}'")
     return natsorted(audio_files)
 
 def split_audio_on_silence(audio_path: Path, min_silence_len=1500, silence_thresh=-40):
@@ -345,6 +364,16 @@ def get_digits_numbers_from_string(s):
     return int(match.group()) if match else None
 
 def apply_processing_filter(file_list: list, chapter_ranges: list) -> list:
+    selected_ids = getattr(cfg, "SELECTED_SENTENCE_IDS", None)
+    if selected_ids:
+        filtered = []
+        for file_path in file_list:
+            num = get_digits_numbers_from_string(Path(file_path).name)
+            if num is not None and num in selected_ids:
+                filtered.append(file_path)
+        print(f"ℹ️  Explicit ID filter: {len(filtered)} files (from {len(file_list)})")
+        return filtered
+
     if not USE_FILTERING:
         print("ℹ️  Filtering disabled. Processing all files.")
         return file_list
@@ -655,6 +684,11 @@ if __name__ == "__main__":
     global_start = time.perf_counter()
     prefix = f"{LOCAL_LANGUAGE.lower()}_phrasebook_"
     subset_files_now: list[Path] = []
+    strict_filtering = bool(getattr(cfg, "SELECTED_SENTENCE_IDS", None)) or (
+        FILTER_SENTENCE_START is not None and FILTER_SENTENCE_END is not None
+    ) or (
+        START_CHAPTER is not None and END_CHAPTER is not None
+    )
 
     if USE_FILTERING:
         original_dir = local_audio_path / "original_audios"
@@ -669,13 +703,15 @@ if __name__ == "__main__":
             "bilingual_sentences_chapters",
         }
 
-        for item in local_audio_path.iterdir():
-            if item.is_dir() and item.name not in generated_folders:
-                try:
-                    shutil.move(str(item), original_dir / item.name)
-                    print(f"📂 Moved {item.name} → original_audios")
-                except Exception as e:
-                    print(f"❌ Move error '{item}': {e}")
+        # Only reorganize the dataset on full runs; subset runs should not touch unrelated files.
+        if not strict_filtering:
+            for item in local_audio_path.iterdir():
+                if item.is_dir() and item.name not in generated_folders:
+                    try:
+                        shutil.move(str(item), original_dir / item.name)
+                        print(f"📂 Moved {item.name} → original_audios")
+                    except Exception as e:
+                        print(f"❌ Move error '{item}': {e}")
 
         with log_time("Step 3 (Gather Files)"):
             all_audio_files, _ = get_audio(original_dir, check_subfolders=True)
@@ -702,12 +738,13 @@ if __name__ == "__main__":
 
         working_input_dir = local_audio_path
         
-        subdirs = check_subdirectories(local_audio_path)
-        if subdirs:
-            try:
-                _ = extract_audios_and_move_original(local_audio_path)
-            except Exception as e:
-                print(f"❌ Extract error: {e}")
+        if not strict_filtering:
+            subdirs = check_subdirectories(local_audio_path)
+            if subdirs:
+                try:
+                    _ = extract_audios_and_move_original(local_audio_path)
+                except Exception as e:
+                    print(f"❌ Extract error: {e}")
     else:
         subdirs = check_subdirectories(local_audio_path)
         if subdirs:
@@ -867,7 +904,11 @@ if __name__ == "__main__":
         )
 
     # Noise reduction (overwrite in place) - parallelized
-    nr_files = list(bilingual_output_path.glob("*.mp3"))
+    # Restrict NR to the selected/produced IDs only (avoid processing leftover files from prior runs).
+    nr_files = [
+        f for f in bilingual_output_path.glob("*.mp3")
+        if (get_digits_numbers_from_string(f.name) in target_ids)
+    ]
     if nr_files:
         max_workers_nr = getattr(cfg, "MAX_WORKERS", 2)
         logging.info(f"▶️ Running noise reduction in parallel ({len(nr_files)} files, workers={max_workers_nr})")

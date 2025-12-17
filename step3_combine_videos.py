@@ -243,6 +243,20 @@ def main() -> None:
             print("⚠ No chapters detected – nothing to do.")
             return
 
+        selected_ids = getattr(cfg, "SELECTED_SENTENCE_IDS", None)
+        if not selected_ids:
+            start_sentence = getattr(cfg, "START_SENTENCE", None)
+            end_sentence = getattr(cfg, "END_SENTENCE", None)
+            if start_sentence is not None and end_sentence is not None:
+                try:
+                    selected_ids = set(range(int(start_sentence), int(end_sentence) + 1))
+                except Exception:
+                    selected_ids = None
+
+        if selected_ids:
+            chapter_map = {c: [sid for sid in ids if sid in selected_ids] for c, ids in chapter_map.items()}
+            chapter_map = {c: ids for c, ids in chapter_map.items() if ids}
+
         # --- Chapter selection ---
         if SINGLE_CHAPTER is not None:
             chapter_map = {c: ids for c, ids in chapter_map.items() if c == SINGLE_CHAPTER}

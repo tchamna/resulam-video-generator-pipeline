@@ -861,6 +861,24 @@ def render_all_sentences(
             # Re-raise so the caller can observe the failure if needed
             raise
 
+    selected_ids = getattr(cfg, "SELECTED_SENTENCE_IDS", None)
+    if selected_ids:
+        selected = [s for s in sentences if s.get("id") in selected_ids]
+        selected.sort(key=lambda x: x["id"])
+        if not selected:
+            print("⚠ No sentences found for SELECTED_SENTENCE_IDS. Nothing to render.")
+            return
+        print(f"▶ Rendering {len(selected)} selected sentence(s): {selected[0]['id']}…{selected[-1]['id']}")
+        with ThreadPoolExecutor(max_workers=MAX_PARALLEL_JOBS) as ex:
+            futures = [ex.submit(worker, s) for s in selected]
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception as e:
+                    logging.error(f"❌ Error rendering: {e}")
+        print("✔ Finished rendering selected sentences")
+        return
+
     # --- Option A: sentence range ---
     if start_sentence is not None or end_sentence is not None:
         if start_sentence is None or end_sentence is None:

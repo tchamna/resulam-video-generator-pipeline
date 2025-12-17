@@ -915,7 +915,12 @@ if __name__ == "__main__":
         except Exception:
             end_id = None
 
-        if start_id is not None or end_id is not None:
+        selected_ids = getattr(cfg, "SELECTED_SENTENCE_IDS", None)
+        if selected_ids:
+            before = len(all_src)
+            all_src = [p for p in all_src if (n := get_digits_numbers_from_string(p.name)) is not None and n in selected_ids]
+            logging.info(f"Filtering explicit IDs: {len(selected_ids)} ids ({before} files -> {len(all_src)} files)")
+        elif start_id is not None or end_id is not None:
             lo = start_id if start_id is not None else -1_000_000_000
             hi = end_id if end_id is not None else 1_000_000_000
             before = len(all_src)
