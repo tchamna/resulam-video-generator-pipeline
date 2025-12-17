@@ -283,7 +283,13 @@ def copy_and_normalize_to_gen1_parallel(src_files: list[Path], out_dir: Path) ->
             trimmed_a1 = trim_leading_trailing(a1)
             combined = normalize(head + trimmed_a1 + trailing)
 
-            repeat = 2
+            # Repeat behavior for sentence IDs with only one local variant (no "N_.mp3").
+            # Default is 2 in lecture mode (so learners hear the same line twice),
+            # but you can disable duplication by setting cfg.REPEAT_LOCAL_AUDIO = 1.
+            try:
+                repeat = max(1, int(getattr(cfg, "REPEAT_LOCAL_AUDIO", 2)))
+            except Exception:
+                repeat = 2
             try:
                 if getattr(cfg, "MODE", "").lower() == "homework":
                     repeat = 1
