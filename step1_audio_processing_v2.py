@@ -498,18 +498,16 @@ def merge_bilingual_padded(eng_dir: Path, local_padded_dir: Path, out_dir: Path,
         local_seg = remove_trailing_silence(AudioSegment.from_file(f))
         if eng:
             eng_seg = remove_trailing_silence(AudioSegment.from_file(eng))
-            # Insert a pause before English in both modes
             if mode == 'lecture':
-                parts.append(mid)               # pause before English
                 parts.append(eng_seg)
-                parts.append(mid)               # existing pause after English
+                parts.append(mid)
                 parts.append(local_seg)
             else:
-                # homework: local repeated before English, add pause before English as well
+                # homework: local repeated before English
                 parts.append(local_seg)
                 parts.append(mid)
                 parts.append(local_seg)
-                parts.append(mid)               # extra pause before English
+                parts.append(mid)
                 parts.append(eng_seg)
         else:
             parts.append(local_seg)
@@ -551,7 +549,6 @@ def merge_bilingual_padded_parallel(eng_dir: Path, local_padded_dir: Path, out_d
         if eng:
             eng_seg = remove_trailing_silence(AudioSegment.from_file(eng))
             if mode == "lecture":
-                parts.append(mid)
                 parts.append(eng_seg)
                 parts.append(mid)
                 parts.append(local_seg)
