@@ -4,8 +4,10 @@ from pathlib import Path
 import os
 
 # List of step scripts in order
+# You can override the step1 implementation via `STEP1_SCRIPT` env var.
+STEP1_SCRIPT = os.getenv("STEP1_SCRIPT", "step1_audio_processing_v2.py")
 steps = [
-    "step1_audio_processing.py",
+    STEP1_SCRIPT,
     "step2_video_production.py",
     "step3_combine_videos.py",
     "step4_udemy_normalization.py",
