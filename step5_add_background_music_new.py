@@ -17,15 +17,74 @@ _cfg_end        = getattr(cfg, "END_CHAPTER", None)
 START_CHAPTER   = 1 if _cfg_start is None else int(_cfg_start)
 END_CHAPTER     = None if _cfg_end is None else int(_cfg_end)
 
+# Parallelism (resolved from env/cfg/cpu below)
 USE_PARALLEL    = False
-MAX_WORKERS     = 2
-FFMPEG_THREADS  = 2
+MAX_WORKERS     = 1
+FFMPEG_THREADS  = 1
 FILES_TO_PROCESS: list[str] = []     # Leave empty to process all
 
 USE_PRIVATE_ASSETS = os.getenv(
     "USE_PRIVATE_ASSETS",
     "1" if getattr(cfg, "USE_PRIVATE_ASSETS", True) else "0"
 ) == "1"
+
+def _parse_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+def _get_workers() -> tuple[bool, int, int]:
+    """
+    Returns (use_parallel, max_workers, ffmpeg_threads).
+
+    Priority:
+      1) env BG_MUSIC_PARALLEL / USE_PARALLEL
+      2) cfg.USE_PARALLEL
+
+    Worker priority:
+      1) env BG_MUSIC_MAX_WORKERS / MAX_WORKERS
+      2) cfg.BG_MUSIC_MAX_WORKERS / cfg.MAX_WORKERS
+      3) os.cpu_count()
+
+    ffmpeg threads priority:
+      1) env BG_MUSIC_FFMPEG_THREADS / FFMPEG_THREADS
+      2) cfg.FFMPEG_THREADS
+      3) auto (cpu_count // workers, at least 1)
+    """
+    cpu = os.cpu_count() or 1
+
+    # parallel toggle
+    use_parallel = bool(getattr(cfg, "USE_PARALLEL", True))
+    v = os.getenv("BG_MUSIC_PARALLEL", os.getenv("USE_PARALLEL"))
+    if v is not None:
+        use_parallel = str(v).strip().lower() not in ("0", "false", "no", "off", "")
+
+    # workers
+    workers_default = cpu
+    workers_cfg = getattr(cfg, "BG_MUSIC_MAX_WORKERS", getattr(cfg, "MAX_WORKERS", None))
+    if workers_cfg is not None:
+        workers_default = max(workers_default, _parse_int(workers_cfg, workers_default))
+    workers_env = os.getenv("BG_MUSIC_MAX_WORKERS", os.getenv("MAX_WORKERS"))
+    max_workers = max(1, _parse_int(workers_env, workers_default)) if workers_env is not None else max(1, int(workers_default))
+    max_workers = min(max_workers, cpu)
+
+    # ffmpeg threads per job
+    threads_env = os.getenv("BG_MUSIC_FFMPEG_THREADS", os.getenv("FFMPEG_THREADS"))
+    threads_default = getattr(cfg, "FFMPEG_THREADS", None)
+    if threads_default is None:
+        threads_default = max(1, cpu // max(1, max_workers))
+    ffmpeg_threads = max(1, _parse_int(threads_env, threads_default)) if threads_env is not None else max(1, _parse_int(threads_default, 1))
+
+    # Avoid obvious oversubscription when user didn't explicitly set threads.
+    if threads_env is None and ffmpeg_threads * max_workers > cpu:
+        ffmpeg_threads = max(1, cpu // max(1, max_workers))
+
+    return use_parallel, max_workers, ffmpeg_threads
+
+
+# Resolve parallelism knobs (env/cfg/cpu auto)
+USE_PARALLEL, MAX_WORKERS, FFMPEG_THREADS = _get_workers()
 
 def get_asset_path(relative: str) -> Path:
     base = BASE_DIR / ("private_assets" if USE_PRIVATE_ASSETS else "assets")
@@ -124,7 +183,9 @@ def add_bg_music_to_audio(normalized_audio: Path, music_file: Path, out_dir: Pat
 if __name__ == "__main__":
     start_time = time.perf_counter()
     files = select_files()
+    workers_now = max(1, min(int(MAX_WORKERS or 1), len(files) or 1))
     logging.info(f"🎯 {len(files)} normalized files selected (chapters {START_CHAPTER}–{END_CHAPTER})")
+    logging.info(f"Parallel={USE_PARALLEL} workers={workers_now} ffmpeg_threads={FFMPEG_THREADS} music_gain_db={MUSIC_GAIN_DB}")
 
     def process(f: Path):
         try:
@@ -137,8 +198,8 @@ if __name__ == "__main__":
         except Exception as e:
             return f"❌ {f.name} failed: {e}"
 
-    if USE_PARALLEL:
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+    if USE_PARALLEL and workers_now > 1:
+        with ThreadPoolExecutor(max_workers=workers_now) as ex:
             for result in ex.map(process, files):
                 logging.info(result)
     else:
