@@ -154,6 +154,25 @@ Organize your files as follows
 - **REPEAT_LOCAL_AUDIO = 2**: Set to `2` to repeat the local language audio twice, or `1` if already repeated.
 - **FLAG_PAD = True**: Enable (`True`) or disable (`False`) extending silence between chunks.
 
+### Speed / parallelism (Step 1)
+
+If Step 1 audio generation feels slow, use the parallelized variant scripts:
+- `step1_audio_processing_v2.py` (recommended)
+- `step1_audio_mix.py` (compatibility wrapper around v2)
+
+Tuning knobs:
+- `AUDIO_MAX_WORKERS` (env) or `MAX_WORKERS` in `step0_config.py` controls how many audio files are processed concurrently.
+- `START_ID` / `END_ID` (env) restricts the sentence IDs to process for quick test runs.
+- Chapter MP3s are concatenated with ffmpeg concat (`-c copy`) when possible (very fast); it falls back to re-encode / pydub if ffmpeg fails.
+
+Example:
+
+```powershell
+$env:AUDIO_MAX_WORKERS = 6
+$env:START_ID = 1; $env:END_ID = 200
+python step1_audio_processing_v2.py
+```
+
 # Step 2: Video Production Pipeline
 
 This module creates videos by combining the prepared audio and text files with visual assets.
