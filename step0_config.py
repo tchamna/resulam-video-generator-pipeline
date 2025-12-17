@@ -101,7 +101,7 @@ EXCLUDED_SENTENCES = set()
 # ─── Background Music ──────────────────────────────
 MUSIC_FILENAME = f"{LANGUAGE.lower()}_music_background.mp3"
 MUSIC_VOLUME = 0.1
-MUSIC_GAIN_DB = -25.0  # Step 5 background music attenuation (negative = quieter)
+MUSIC_GAIN_DB = -20.0  # Step 5 background music attenuation (negative = quieter)
 
 # ─── Parallelism ───────────────────────────────────
 USE_PARALLEL = True
