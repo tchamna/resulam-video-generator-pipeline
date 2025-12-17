@@ -39,6 +39,7 @@ OUTPUT_DIR          = COMBINED_VIDEO_DIR / "normalized_with_bg"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 MUSIC_FILENAME = getattr(cfg, "MUSIC_FILENAME", f"{LANGUAGE.lower()}_music_background.mp3")
+MUSIC_GAIN_DB  = float(getattr(cfg, "MUSIC_GAIN_DB", -25.0))
 MUSIC_PATH     = LANG_BASE_DIR / MUSIC_FILENAME
 if not MUSIC_PATH.exists():
     raise FileNotFoundError(f"Background music file not found: {MUSIC_PATH}")
@@ -129,9 +130,9 @@ if __name__ == "__main__":
         try:
             logging.info(f"🎬 Adding background music: {f.name}")
             if f.suffix.lower() in ['.mp4', '.mov', '.avi']:
-                out = add_bg_music_to_video(f, MUSIC_PATH, OUTPUT_DIR, music_gain_db=-25.0)
+                out = add_bg_music_to_video(f, MUSIC_PATH, OUTPUT_DIR, music_gain_db=MUSIC_GAIN_DB)
             else:
-                out = add_bg_music_to_audio(f, MUSIC_PATH, OUTPUT_DIR, music_gain_db=-25.0)
+                out = add_bg_music_to_audio(f, MUSIC_PATH, OUTPUT_DIR, music_gain_db=MUSIC_GAIN_DB)
             return f"✅ {f.name} -> {out.name}"
         except Exception as e:
             return f"❌ {f.name} failed: {e}"

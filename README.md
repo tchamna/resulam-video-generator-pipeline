@@ -93,6 +93,7 @@ change_settings({"IMAGEMAGICK_BINARY": None})
 What this means for you:
 - You do NOT need to install ImageMagick just to run `step2_video_production.py` in the typical pipeline flow — the script will prefer Pillow/FreeType and will also fall back to in-repo rasterization for some labels using the bundled Charis TTF.
 - If you run other scripts that still call `TextClip` with ImageMagick-specific features, or if you explicitly override settings, ImageMagick may still be required.
+- If you want to opt back into ImageMagick/TextClip, set `USE_IMAGEMAGICK=1` (optionally also set `IMAGEMAGICK_BINARY=magick`).
 
 If you prefer to install ImageMagick system-wide (optional):
 
@@ -174,13 +175,53 @@ This module creates videos by combining the prepared audio and text files with v
 
 * **Text-Audio Synchronization**: Maps processed bilingual audio files to their corresponding sentences from the text file.
 
-* **Automated Resizing**: Automatically resizes all background images to a 1980x1080 pixel resolution.
+* **Automated Resizing**: Automatically resizes all background images to `VIDEO_RESOLUTION` (default: 1920x1080).
 
 * **Ad Placement**: Allows a portion of the screen (the lower half) to be used for ads or other content.
 
 * **Customizable Logo**: Positions the Resulam logo at the bottom left and right of the video.
 
 * **Start Point Control**: Enables the user to specify a starting sentence number for video production, allowing for easy resumption of a paused task.
+
+## HD output vs. safe text area
+
+- The final video output size is controlled by `VIDEO_RESOLUTION` (default `1920x1080`, i.e. HD).
+- The captions use a smaller *safe area* inside that frame so they don't collide with the header row (language + `Please Support Resulam`) and the bottom logos:
+  - Caption width budget: `VIDEO_RESOLUTION[0] - 200` (1920 - 200 = `1720px`)
+  - Caption height budget: `VIDEO_RESOLUTION[1] - y_start - bottom_safe` (1080 - 120 - 140 = `820px`)
+- Those numbers are *layout limits*, not the exported resolution.
+
+## Long captions: wrapping + shrink-to-fit
+
+`step2_video_production.py` renders captions with the bundled `assets/Fonts/CharisSIL-*.ttf` via Pillow. It then uses two mechanisms to keep text on-screen:
+
+1. **Wrap to width** (`make_text_clip(..., size=(max_width, None))`)
+   - Measures text in pixels and wraps by words.
+   - If a single `word` is too long (no spaces), it is split into smaller chunks so it still fits.
+   - Explicit newlines in the input are preserved.
+
+2. **Shrink-to-fit height** (`fit_caption_block(...)`)
+   - Used for the 3-line caption stack (Local + English + French).
+   - Renders the whole stack at the requested font size, measures the total stacked height (+ gaps), and if it exceeds the height budget it reduces the font size by ~10% and tries again.
+   - **Important behavior:** the stack uses *one font size for all three lines*, so if only the middle line is extremely long, *all three lines* will shrink until the **total** height fits.
+   - Stops shrinking at `MIN_CAPTION_FONT_SIZE` from `step0_config.py` (optional; default is `18`). If the text still can't fit at the minimum, the stack may still overflow and you should lower `MIN_CAPTION_FONT_SIZE`, shorten the text, or increase the available layout budget.
+
+### Performance / overhead
+
+Shrink-to-fit is only extra work when shrinking is actually needed:
+- If the stack fits at the requested font size, it renders once (no extra overhead).
+- If it doesn't fit, it re-renders the 3 caption lines multiple times while searching for a size that fits. In worst-case `extremely long` triplets this can add noticeable time (multiple re-renders per sentence).
+- The cost is proportional to the number of tries: each try rasterizes 3 text clips (Local/English/French), so 10 tries means ~30 text renders for that sentence.
+
+### Demo: long triplet rendering
+
+Use `tools/test_long_triplet_render.py` to see the behavior on long triplets:
+
+```powershell
+python .\tools\test_long_triplet_render.py
+```
+
+It writes `test_long_triplet_*_shrink.mp4` (and one `_noshrink.mp4` comparison) into the current language/mode output folder (same `VIDEO_OUT_DIR` used by `step2_video_production.py`).
 
 
 
@@ -190,7 +231,28 @@ This module creates videos by combining the prepared audio and text files with v
 
 # Step 3: Video Chunks Processor
 
-This final script is a post-production tool that combines multiple individual videos into larger, chapter-based video files.
+This script is a post-production tool that combines multiple individual videos into larger, chapter-based video files.
+
+# Step 4: Normalize combined videos (Udemy)
+
+`step4_udemy_normalization.py` takes the combined chapter videos from Step 3 and creates normalized outputs under:
+
+- `.../Results_Videos/<Mode>/<Language>_Chapters_Combined/normalized_output/`
+
+This is the input folder for Step 5.
+
+# Step 5: Add background music
+
+`step5_add_background_music_new.py` overlays a background music track under each normalized chapter file:
+
+- Music file: `.../Languages/<Language>Phrasebook/<MUSIC_FILENAME>` (default: `<language>_music_background.mp3`)
+- Output folder: `.../Results_Videos/<Mode>/<Language>_Chapters_Combined/normalized_with_bg/`
+- Volume: `MUSIC_GAIN_DB` in `step0_config.py` (more negative = quieter music)
+
+How it works (high-level):
+1. Loads the normalized file audio and the music file with `pydub.AudioSegment`.
+2. Lowers the music volume using `MUSIC_GAIN_DB` from `step0_config.py` (default `-25.0`), loops it to match the speech duration, and overlays it under the speech.
+3. For video files: exports a temporary WAV then uses `ffmpeg` to mux the original video stream with the new mixed audio (`-c:v copy`, `-shortest`).
 
 ## Quick benchmark and tuning
 

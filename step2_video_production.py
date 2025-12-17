@@ -22,6 +22,22 @@ import step0_config as cfg
 
 from moviepy.config import change_settings
 
+# Text rendering backend:
+# - Default: disable ImageMagick so we consistently use the bundled TTF fonts (Charis SIL)
+#   via the Pillow renderer below.
+# - To force ImageMagick/TextClip, set USE_IMAGEMAGICK=1 (optionally also IMAGEMAGICK_BINARY).
+USE_IMAGEMAGICK = os.getenv("USE_IMAGEMAGICK", "0") == "1"
+if USE_IMAGEMAGICK:
+    _im_bin = os.getenv("IMAGEMAGICK_BINARY")
+    if _im_bin:
+        change_settings({"IMAGEMAGICK_BINARY": _im_bin})
+    elif shutil.which("magick"):
+        change_settings({"IMAGEMAGICK_BINARY": "magick"})
+else:
+    change_settings({"IMAGEMAGICK_BINARY": None})
+
+_WARNED_FORCE_TEXTCLIP_FALLBACK = False
+
 # # ─── Asset Source Config ──────────────────────────────
 # USE_PRIVATE_ASSETS = True   # switch here: True → private_assets, False → normal assets
 # USE_PRIVATE_ASSETS = False   # switch here: True → private_assets, False → normal assets
@@ -83,7 +99,22 @@ def get_asset_path(relative_path: str) -> Path:
 # FONT_PATH = BASE_DIR / "assets"/ "Fonts" / "arialbd.ttf"
 # LOGO_PATH = BASE_DIR/ "assets" / "resulam_logo_resurrectionLangue.png"
 
-FONT_PATH = get_asset_path( cfg.FONT_PATH)
+# Resolve FONT_PATH: if the config provided an absolute/existing path, prefer it;
+# otherwise treat it as a relative path under the selected assets folder.
+try:
+    cfg_font = cfg.FONT_PATH
+except Exception:
+    cfg_font = None
+
+if cfg_font:
+    candidate = Path(cfg_font)
+    if candidate.exists():
+        FONT_PATH = candidate
+    else:
+        # if cfg.FONT_PATH was given as a relative path string, resolve inside assets/private_assets
+        FONT_PATH = get_asset_path(str(cfg_font))
+else:
+    FONT_PATH = get_asset_path("Fonts/arialbd.ttf")
 
 LOGO_PATH = get_asset_path("resulam_logo_resurrectionLangue.png")
 
@@ -166,6 +197,12 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+logging.info(
+    "Text rendering backend: %s",
+    "ImageMagick/TextClip" if USE_IMAGEMAGICK else "Pillow (bundled TTF)",
+)
+logging.info("FONT_PATH: %s (exists=%s)", str(FONT_PATH), Path(FONT_PATH).exists())
 
 
 def format_elapsed(seconds: float) -> str:
@@ -270,6 +307,218 @@ def calculate_font_size(sentence: Dict) -> int:
         return int(DEFAULT_FONT_SIZE * 0.75)
     return int(DEFAULT_FONT_SIZE * 0.65)
 
+
+# Robust text clip creator: Pillow-first (bundled TTF), optional TextClip/ImageMagick
+def make_text_clip(text: str, *, font: Path | str, fontsize: int, color: str = "white",
+                   size: tuple | None = None, method: str = "caption"):
+    # Prefer Pillow by default (bundled TTF), optionally TextClip/ImageMagick
+    force_textclip = os.getenv("FORCE_TEXTCLIP", "0") == "1"
+
+    if USE_IMAGEMAGICK or force_textclip:
+        try:
+            # Try several ways of specifying the font so ImageMagick can resolve it
+            font_candidates = []
+            try:
+                p = Path(font)
+                font_candidates.append(str(p))
+                font_candidates.append(str(p.resolve()))
+                font_candidates.append(p.name)
+                font_candidates.append(p.stem)
+                # POSIX-style path may help on Windows with ImageMagick
+                font_candidates.append(str(p).replace('\\', '/'))
+            except Exception:
+                font_candidates.append(str(font))
+
+            font_candidates.append(str(font))
+
+            tried = []
+            for ftry in font_candidates:
+                if ftry in tried:
+                    continue
+                tried.append(ftry)
+                try:
+                    tc = TextClip(
+                        text,
+                        font=ftry,
+                        fontsize=int(fontsize),
+                        color=color,
+                        method=method,
+                        size=size if size is not None else None,
+                    )
+                    if getattr(tc, "w", 0) <= 0 or getattr(tc, "h", 0) <= 0:
+                        raise RuntimeError("Empty TextClip created")
+                    logging.debug("TextClip created using font spec: %s", ftry)
+                    return tc
+                except Exception:
+                    logging.debug("TextClip font try failed: %s", ftry)
+            raise RuntimeError("All TextClip font candidates failed")
+        except Exception as e:
+            if force_textclip:
+                global _WARNED_FORCE_TEXTCLIP_FALLBACK
+                if not _WARNED_FORCE_TEXTCLIP_FALLBACK:
+                    logging.warning(
+                        "FORCE_TEXTCLIP=1 set but TextClip failed; using Pillow fallback instead. (%s)",
+                        e,
+                    )
+                    _WARNED_FORCE_TEXTCLIP_FALLBACK = True
+                else:
+                    logging.debug(
+                        "FORCE_TEXTCLIP=1 set but TextClip failed; using Pillow fallback. (%s)",
+                        e,
+                    )
+            if USE_IMAGEMAGICK:
+                logging.debug("TextClip (ImageMagick) failed; falling back to Pillow. (%s)", e)
+
+    logging.debug("Rendering text with Pillow")
+
+    # Pillow fallback (use explicit TTF if available)
+    try:
+        text = "" if text is None else str(text)
+        try:
+            pil_font = ImageFont.truetype(str(font), int(fontsize))
+        except Exception as e:
+            logging.warning("Failed to load TTF font %s; using default font. (%s)", str(font), e)
+            pil_font = ImageFont.load_default()
+
+        max_w = None
+        if size and size[0]:
+            max_w = int(size[0])
+
+        draw_tmp = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+        _, base_line_h = draw_tmp.textsize("Ag", font=pil_font)
+        line_gap = max(2, int(int(fontsize) * 0.06))
+
+        def text_width(s: str) -> int:
+            return int(draw_tmp.textsize(s, font=pil_font)[0])
+
+        def split_long_token(token: str) -> list[str]:
+            # Split an unbreakable token (e.g., aVeryVeryLongWord) into chunks that fit max_w
+            if not token:
+                return [""]
+            parts: list[str] = []
+            cur = ""
+            for ch in token:
+                if cur and text_width(cur + ch) > max_w:
+                    parts.append(cur)
+                    cur = ch
+                else:
+                    cur += ch
+            if cur:
+                parts.append(cur)
+            return parts
+
+        def wrap_paragraph(paragraph: str) -> list[str]:
+            words = paragraph.split()
+            if not words:
+                return [""]
+            lines: list[str] = []
+            cur = ""
+            for token in words:
+                if not cur:
+                    if text_width(token) <= max_w:
+                        cur = token
+                    else:
+                        chunks = split_long_token(token)
+                        lines.extend(chunks[:-1])
+                        cur = chunks[-1]
+                    continue
+
+                test = f"{cur} {token}"
+                if text_width(test) <= max_w:
+                    cur = test
+                else:
+                    lines.append(cur)
+                    if text_width(token) <= max_w:
+                        cur = token
+                    else:
+                        chunks = split_long_token(token)
+                        lines.extend(chunks[:-1])
+                        cur = chunks[-1]
+            if cur:
+                lines.append(cur)
+            return lines
+
+        if max_w:
+            paragraphs = text.splitlines() or [text]
+            lines: list[str] = []
+            for para in paragraphs:
+                if lines:
+                    lines.append("")  # preserve explicit newline between paragraphs
+                lines.extend(wrap_paragraph(para))
+        else:
+            lines = text.splitlines() or [text]
+
+        # Measure text block size
+        line_sizes = [draw_tmp.textsize(line, font=pil_font) if line else (0, base_line_h) for line in lines]
+        width = max((w for w, h in line_sizes), default=0)
+        height = sum((h for w, h in line_sizes), 0) + (len(lines) - 1) * line_gap
+
+        img = Image.new("RGBA", (max(width, 1), max(height, 1)), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        y = 0
+        fill = ImageColor.getrgb(color)
+        for i, line in enumerate(lines):
+            if line:
+                draw.text((0, y), line, font=pil_font, fill=fill)
+            y += line_sizes[i][1]
+            if i != len(lines) - 1:
+                y += line_gap
+
+        arr = np.array(img)
+        clip = ImageClip(arr).set_duration(0.0)
+        clip = clip.set_fps(FRAME_RATE)
+        return clip
+    except Exception:
+        logging.exception("Pillow fallback failed for make_text_clip")
+        # final minimal fallback
+        img = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+        arr = np.array(img)
+        clip = ImageClip(arr).set_duration(0.0)
+        clip = clip.set_fps(FRAME_RATE)
+        return clip
+
+
+def fit_caption_block(
+    parts: list[tuple[str, str]],
+    *,
+    font: Path | str,
+    fontsize: int,
+    max_width: int,
+    max_height: int,
+    gap: int = 10,
+    min_fontsize: int = 18,
+) -> tuple[int, list]:
+    """
+    Create a stacked set of caption clips that fits within max_height by reducing font size.
+    Returns (font_size_used, clips) in the same order as parts.
+    """
+    if not parts:
+        return int(fontsize), []
+
+    fs = int(fontsize)
+    min_fs = max(8, int(min_fontsize))
+    max_width_i = int(max_width)
+    max_height_i = int(max_height)
+
+    while True:
+        clips = [
+            make_text_clip(
+                text,
+                font=font,
+                fontsize=fs,
+                color=color,
+                method="caption",
+                size=(max_width_i, None),
+            )
+            for text, color in parts
+        ]
+        total_h = sum(int(getattr(c, "h", 0) or 0) for c in clips) + gap * (len(clips) - 1)
+        if max_height_i <= 0 or total_h <= max_height_i or fs <= min_fs:
+            return fs, clips
+
+        new_fs = max(min_fs, int(fs * 0.9))
+        fs = new_fs if new_fs < fs else (fs - 1)
+
 # ── BUILD SINGLE VIDEO ──────────────────────────────────────────────────
 
 def create_video_clip(sentence: Dict):
@@ -333,15 +582,18 @@ def create_video_clip(sentence: Dict):
     clips = [bg]
 
     # --- Header row ---
-    clips.append(TextClip(LANGUAGE.title(), font=str(FONT_PATH),
-                          fontsize=int(font_size * 0.55), color="yellow", method="label")
-                 .set_position((15, MARGIN_TOP)).set_duration(total_duration))
-    support_clip = TextClip("Please Support Resulam", font=str(FONT_PATH),
-                            fontsize=int(font_size * 0.5), color="yellow", method="label")
+    lang_clip = make_text_clip(LANGUAGE.title(), font=FONT_PATH,
+                               fontsize=int(font_size * 0.55), color="yellow", method="label")
+    lang_clip = lang_clip.set_position((15, MARGIN_TOP)).set_duration(total_duration)
+    clips.append(lang_clip)
+
+    support_clip = make_text_clip("Please Support Resulam", font=FONT_PATH,
+                                 fontsize=int(font_size * 0.5), color="yellow", method="label")
     support_clip = support_clip.set_position(("right", MARGIN_TOP)).set_duration(total_duration)
     clips.append(support_clip)
-    num_clip = TextClip(str(sentence["id"]), font=str(FONT_PATH),
-                        fontsize=int(font_size * 0.6), color="white", method="label")
+    # Use make_text_clip for the numeric badge so fallback works if TextClip can't render
+    num_clip = make_text_clip(str(sentence["id"]), font=FONT_PATH,
+                              fontsize=int(font_size * 0.6), color="white", method="label")
     num_clip = num_clip.set_position(
         (VIDEO_RESOLUTION[0] - num_clip.w - MARGIN_RIGHT, MARGIN_TOP + support_clip.h + 10)
     ).set_duration(total_duration)
@@ -350,27 +602,35 @@ def create_video_clip(sentence: Dict):
     # --- Captions ---
     if MODE.lower() == "lecture":
         current_y = y_position_lecture
-        # Local
-        src_clip = TextClip(sentence["source"], font=str(FONT_PATH), fontsize=font_size,
-                            color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
-                            ).set_duration(total_duration)
-        src_clip = src_clip.set_position(("center", current_y))
+        max_width = VIDEO_RESOLUTION[0] - 200
+        bottom_safe = 140  # reserve space for logos + padding
+        max_block_h = VIDEO_RESOLUTION[1] - current_y - bottom_safe
+        min_caption_fs = int(getattr(cfg, "MIN_CAPTION_FONT_SIZE", 18))
+
+        _, caption_clips = fit_caption_block(
+            [
+                (sentence["source"], "white"),
+                (sentence["english"], "yellow"),
+                (sentence["french"], "white"),
+            ],
+            font=FONT_PATH,
+            fontsize=font_size,
+            max_width=max_width,
+            max_height=max_block_h,
+            gap=10,
+            min_fontsize=min_caption_fs,
+        )
+        src_clip, eng_clip, fr_clip = caption_clips
+
+        src_clip = src_clip.set_duration(total_duration).set_position(("center", current_y))
         clips.append(src_clip)
         current_y += src_clip.h + 10
 
-        # English
-        eng_clip = TextClip(sentence["english"], font=str(FONT_PATH), fontsize=font_size,
-                            color="yellow", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
-                            ).set_duration(total_duration)
-        eng_clip = eng_clip.set_position(("center", current_y))
+        eng_clip = eng_clip.set_duration(total_duration).set_position(("center", current_y))
         clips.append(eng_clip)
         current_y += eng_clip.h + 10
 
-        # French
-        fr_clip = TextClip(sentence["french"], font=str(FONT_PATH), fontsize=font_size,
-                           color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
-                           ).set_duration(total_duration)
-        fr_clip = fr_clip.set_position(("center", current_y))
+        fr_clip = fr_clip.set_duration(total_duration).set_position(("center", current_y))
         clips.append(fr_clip)
 
     else:  # homework
@@ -378,43 +638,56 @@ def create_video_clip(sentence: Dict):
         current_y = y_position_homework
 
         # Intro
-        intro_clip = TextClip(intro_msg, font=str(FONT_PATH), fontsize=int(font_size*0.9),
-                              color="white", method="label"
-                              ).set_position(("center", current_y)).set_start(0).set_duration(local_lang_2_start)
+        intro_clip = make_text_clip(intro_msg, font=FONT_PATH, fontsize=int(font_size*0.9),
+                         color="white", method="label")
+        intro_clip = intro_clip.set_position(("center", current_y)).set_start(0).set_duration(local_lang_2_start)
         clips.append(intro_clip)
         current_y += intro_clip.h + 10
 
-        repeat_clip = TextClip("Listen, repeat and translate", font=str(FONT_PATH), fontsize=font_size,
-                               color="yellow", method="label"
-                               ).set_position(("center", current_y)).set_start(0).set_duration(local_lang_2_start)
+        repeat_clip = make_text_clip("Listen, repeat and translate", font=FONT_PATH, fontsize=font_size,
+                         color="yellow", method="label")
+        repeat_clip = repeat_clip.set_position(("center", current_y)).set_start(0).set_duration(local_lang_2_start)
         clips.append(repeat_clip)
 
+        # Fit caption font size so the (local + English + French) stack always stays on-screen.
+        max_width = VIDEO_RESOLUTION[0] - 200
+        bottom_safe = 140  # reserve space for logos + padding
+        max_block_h = VIDEO_RESOLUTION[1] - y_position_homework - bottom_safe
+        min_caption_fs = int(getattr(cfg, "MIN_CAPTION_FONT_SIZE", 18))
+        caption_fs, caption_clips = fit_caption_block(
+            [
+                (sentence["source"], "white"),
+                (sentence["english"], "yellow"),
+                (sentence["french"], "white"),
+            ],
+            font=FONT_PATH,
+            fontsize=font_size,
+            max_width=max_width,
+            max_height=max_block_h,
+            gap=10,
+            min_fontsize=min_caption_fs,
+        )
+        src_tmp, eng_tmp, fr_tmp = caption_clips
+
         # Second playback → only local
-        src_clip2 = TextClip(sentence["source"], font=str(FONT_PATH), fontsize=font_size,
-                             color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
-                             ).set_position(("center", y_position_homework)
-                             ).set_start(local_lang_2_start).set_duration(local_lang_3_start - local_lang_2_start)
+        src_clip2 = make_text_clip(sentence["source"], font=FONT_PATH, fontsize=caption_fs,
+                       color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None))
+        src_clip2 = src_clip2.set_position(("center", y_position_homework)).set_start(local_lang_2_start).set_duration(local_lang_3_start - local_lang_2_start)
         clips.append(src_clip2)
 
         # Third playback → dynamic stack
         current_y = y_position_homework
-        src_clip3 = TextClip(sentence["source"], font=str(FONT_PATH), fontsize=font_size,
-                             color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
-                             ).set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start)
+        src_clip3 = src_tmp.set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start)
         src_clip3 = src_clip3.set_position(("center", current_y))
         clips.append(src_clip3)
         current_y += src_clip3.h + 10
 
-        eng_clip3 = TextClip(sentence["english"], font=str(FONT_PATH), fontsize=font_size,
-                             color="yellow", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
-                             ).set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start)
+        eng_clip3 = eng_tmp.set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start)
         eng_clip3 = eng_clip3.set_position(("center", current_y))
         clips.append(eng_clip3)
         current_y += eng_clip3.h + 10
 
-        fr_clip3 = TextClip(sentence["french"], font=str(FONT_PATH), fontsize=font_size,
-                            color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None)
-                            ).set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start)
+        fr_clip3 = fr_tmp.set_start(local_lang_3_start).set_duration(total_duration - local_lang_3_start)
         fr_clip3 = fr_clip3.set_position(("center", current_y))
         clips.append(fr_clip3)
 
