@@ -612,7 +612,10 @@ def concatenate_chapters(base_results: Path, bilingual_output_path: Path, chapte
         combined_chapters_audio_folder = base_results / "bilingual_sentences_chapters"
     combined_chapters_audio_folder.mkdir(parents=True, exist_ok=True)
 
-    bilingual_files = sorted([p for p in bilingual_output_path.glob("*.mp3")], key=lambda p: p.name)
+    bilingual_files = list(bilingual_output_path.glob("*.mp3"))
+    bilingual_files.sort(key=lambda p: (get_digits_numbers_from_string(p.name) or 0, p.name.lower()))
+
+    chapter_range_by_name = {chap: (start, end) for start, end, chap in chapter_ranges}
 
     # Restrict by START_CHAPTER/END_CHAPTER if provided in cfg
     start_num, end_num = None, None
@@ -639,6 +642,10 @@ def concatenate_chapters(base_results: Path, bilingual_output_path: Path, chapte
         if chap:
             chapter_to_files[chap].append(f)
 
+    # Ensure deterministic ordering inside each chapter (especially Chap1 where lexicographic sort breaks numeric order)
+    for chap, files in chapter_to_files.items():
+        files.sort(key=lambda p: (get_digits_numbers_from_string(p.name) or 0, p.name.lower()))
+
     rng = None
     try:
         import random
@@ -652,7 +659,37 @@ def concatenate_chapters(base_results: Path, bilingual_output_path: Path, chapte
             if rng:
                 rng.shuffle(files)
 
-        logging.info(f"Concatenating {len(files)} files for {chap} (shuffle={getattr(cfg,'SHUFFLE_HOMEWORK',False) and cfg.MODE=='homework'})")
+        present_ids = [get_digits_numbers_from_string(p.name) for p in files]
+        present_ids = sorted({i for i in present_ids if isinstance(i, int)})
+        if not present_ids:
+            continue
+
+        expected_start, expected_end = chapter_range_by_name.get(chap, (present_ids[0], present_ids[-1]))
+        if start_num is not None and end_num is not None:
+            expected_start = max(int(expected_start), int(start_num))
+            expected_end = min(int(expected_end), int(end_num))
+
+        missing_count = 0
+        missing_at_start: list[int] = []
+        try:
+            present_set = set(present_ids)
+            missing = [i for i in range(int(expected_start), int(expected_end) + 1) if i not in present_set]
+            missing_count = len(missing)
+            missing_at_start = [i for i in range(int(expected_start), min(int(expected_start) + 3, int(expected_end) + 1)) if i in missing]
+        except Exception:
+            pass
+
+        shuffle_on = bool(getattr(cfg, 'SHUFFLE_HOMEWORK', False) and cfg.MODE == 'homework')
+        if missing_count:
+            logging.warning(
+                f"{chap}: missing {missing_count} sentence IDs in {expected_start}-{expected_end} (first={present_ids[0]})"
+            )
+            if missing_at_start:
+                logging.warning(f"{chap}: missing at chapter start: {missing_at_start}")
+
+        logging.info(
+            f"Concatenating {len(files)} files for {chap} (first={present_ids[0]} last={present_ids[-1]} shuffle={shuffle_on})"
+        )
         output_path = combined_chapters_audio_folder / f"phrasebook_{cfg.LANGUAGE}_{chap}.mp3"
 
         if _try_ffmpeg_concat_mp3(files, output_path, reencode_bitrate="192k"):
