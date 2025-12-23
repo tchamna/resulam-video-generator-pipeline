@@ -26,7 +26,8 @@ import os, random, re, time
 import sys
 from pathlib import Path
 from typing import List, Dict, Iterable
-from moviepy.editor import VideoFileClip, concatenate_videoclips
+from moviepy.editor import VideoFileClip, concatenate_videoclips, vfx
+from moviepy.audio.fx.all import audio_fadeout
 
 import logging
 from contextlib import contextmanager
@@ -199,6 +200,10 @@ def chunk(lst: List[Path], size: int) -> Iterable[List[Path]]:
 def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path]) -> None:
     if not clip_paths:
         return
+    out_file = OUTPUT_DIR / f"{LANGUAGE.lower()}_chapter_{chap_idx}_chunk_{chunk_idx:02d}.mp4"
+    if out_file.exists():
+        print(f"Skipped (already exists): {out_file.name}")
+        return
     clips = []
     for p in clip_paths:
         c = _open_clip(p)
@@ -210,8 +215,14 @@ def write_chunk(chap_idx: int, chunk_idx: int, clip_paths: List[Path]) -> None:
 
     print(f"▶ Chapter {chap_idx} chunk {chunk_idx:02d}: concatenating {len(clips)} clips …")
     final = concatenate_videoclips(clips, method="compose")
+    fade_out_sec = float(getattr(cfg, "VIDEO_FADE_OUT_SEC", 1.0))
+    if fade_out_sec > 0:
+        dur = final.duration or fade_out_sec
+        fade_dur = min(fade_out_sec, max(0.1, dur))
+        final = final.fx(vfx.fadeout, fade_dur)
+        if final.audio is not None:
+            final = final.set_audio(final.audio.fx(audio_fadeout, fade_dur))
 
-    out_file = OUTPUT_DIR / f"{LANGUAGE.lower()}_chapter_{chap_idx}_chunk_{chunk_idx:02d}.mp4"
     tmp_file = out_file.with_suffix(".tmp.mp4")
 
     try:
@@ -256,6 +267,17 @@ def main() -> None:
         if selected_ids:
             chapter_map = {c: [sid for sid in ids if sid in selected_ids] for c, ids in chapter_map.items()}
             chapter_map = {c: ids for c, ids in chapter_map.items() if ids}
+
+        # Homework mode: drop the first two sentences of each chapter.
+        if MODE == "homework":
+            trimmed = {}
+            for chap, ids in chapter_map.items():
+                ids_sorted = sorted(ids)
+                if len(ids_sorted) > 2:
+                    trimmed[chap] = ids_sorted[2:]
+                else:
+                    trimmed[chap] = []
+            chapter_map = {c: ids for c, ids in trimmed.items() if ids}
 
         # --- Chapter selection ---
         if SINGLE_CHAPTER is not None:

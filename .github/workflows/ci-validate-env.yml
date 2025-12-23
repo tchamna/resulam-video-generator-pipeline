@@ -1,0 +1,40 @@
+name: CI - Validate environment
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-env:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Create venv and install dependencies
+        run: |
+          python -m venv .venv_ci
+          .\.venv_ci\Scripts\Activate.ps1
+          python -m pip install --upgrade pip
+          if (Test-Path requirements.lock) {
+            Write-Host "Installing from requirements.lock"
+            pip install -r requirements.lock
+          } else {
+            Write-Host "Installing from requirements.txt and generating lock"
+            pip install -r requirements.txt
+            pip freeze > requirements.lock
+          }
+
+      - name: Run smoke test (audio processing)
+        run: |
+          .\.venv_ci\Scripts\Activate.ps1
+          $env:USE_PRIVATE_ASSETS='0'
+          python step1_audio_processing.py

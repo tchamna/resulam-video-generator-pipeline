@@ -61,7 +61,7 @@ SHUFFLE_SEED = None             # or an int like 1234 for reproducible shuffle
 # Option 1: Filter by a range of sentence IDs (inclusive).
 # IMPORTANT: keep only ONE of the `START_SENTENCE, END_SENTENCE = ...` lines uncommented.
 START_SENTENCE, END_SENTENCE = None, None
-# START_SENTENCE, END_SENTENCE = 10, 23
+# START_SENTENCE, END_SENTENCE = 1, 5
 #
 # Option 1b: Filter by an explicit (non-contiguous) set of IDs.
 # Examples: "1-11,23" or "5,7,9-12"
@@ -150,7 +150,7 @@ DEFAULT_FONT_SIZE = 100
 
 # Step 2: Encoding knobs (Windows Media Player compatibility)
 REBUILD_ALL = False
-POSTPROCESS_MP4 = True
+POSTPROCESS_MP4 = False
 AUDIO_SAMPLE_RATE = 48000
 
 # ─── Combining Videos ─────────────────────────────────────
@@ -220,7 +220,10 @@ EXCLUDED_SENTENCES = {
 
 # Optional neural-network noise reduction (external tool like RNNoise)
 # When True, pipeline will attempt to use RNNoise via command-line if available.
+USE_DF_NOISE_REDUCTION = False
 USE_NN_NOISE_REDUCTION = False
+# Optional ffmpeg denoise filter chain used by step1_audio_processing_v2.py
+NN_NOISE_FILTER = "adeclick=w=55:o=75:a=2:t=2.5:b=2,afftdn=nr=6:nt=w:om=o"
 # Path to RNNoise executable or wrapper (if installed). If blank, the pipeline will
 # try to call `rnnoise` on PATH when USE_NN_NOISE_REDUCTION is True.
 RNNOISE_BINARY_PATH = os.getenv("RNNOISE_BINARY_PATH", "")

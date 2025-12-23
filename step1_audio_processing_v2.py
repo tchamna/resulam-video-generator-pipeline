@@ -168,6 +168,98 @@ def _try_ffmpeg_concat_mp3(input_files: list[Path], output_path: Path, *, reenco
                 pass
 
 
+def _get_ffmpeg_bin() -> str:
+    return (
+        shutil.which("ffmpeg")
+        or getattr(cfg, "FFMPEG_BINARY", None)
+        or getattr(AudioSegment, "converter", None)
+        or "ffmpeg"
+    )
+
+
+def _denoise_with_ffmpeg(src: Path, *, filter_str: str, bitrate: str = "192k") -> bool:
+    ffmpeg_bin = _get_ffmpeg_bin()
+    if not ffmpeg_bin:
+        return False
+
+    tmp_dir = src.parent
+    with tempfile.NamedTemporaryFile(dir=tmp_dir, suffix=".tmp.mp3", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(src),
+        "-af",
+        filter_str,
+        "-b:a",
+        bitrate,
+        str(tmp_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, text=True, capture_output=True)
+        tmp_path.replace(src)
+        return True
+    except Exception as e:
+        logging.error(f"⚠ Denoise failed for {src.name}: {e}")
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        return False
+
+
+def denoise_files_ffmpeg(files: list[Path]) -> None:
+    if not files:
+        return
+    filter_str = getattr(cfg, "NN_NOISE_FILTER", "afftdn=nr=6:nt=w:om=o")
+    bitrate = str(getattr(cfg, "NN_NOISE_BITRATE", "192k"))
+    workers = min(_get_max_workers(), len(files))
+    logging.info(f"Running optional denoise (ffmpeg) on {len(files)} files, workers={workers}")
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(_denoise_with_ffmpeg, f, filter_str=filter_str, bitrate=bitrate): f for f in files}
+        for fut in as_completed(futures):
+            _ = fut.result()
+
+
+def denoise_files_deepfilternet(files: list[Path]) -> None:
+    if not files:
+        return
+    try:
+        from df.enhance import enhance, init_df
+        # Prefer the same import path as the standalone test snippet.
+        try:
+            from df.enhance import load_audio, save_audio  # type: ignore
+        except Exception:
+            from df.io import load_audio, save_audio  # type: ignore
+    except Exception as e:
+        logging.error(f"⚠ DeepFilterNet not available: {e}")
+        return
+
+    logging.info(f"Running optional denoise (DeepFilterNet) on {len(files)} files")
+    model, df_state, _ = init_df()
+
+    for src in files:
+        try:
+            audio, _ = load_audio(str(src), sr=df_state.sr())
+            enhanced = enhance(model, df_state, audio)
+            with tempfile.NamedTemporaryFile(dir=src.parent, suffix=src.suffix, delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+            save_audio(str(tmp_path), enhanced, df_state.sr())
+            tmp_path.replace(src)
+        except Exception as e:
+            logging.error(f"⚠ DeepFilterNet failed for {src.name}: {e}")
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except Exception:
+                pass
+
+
 def get_asset_path(relative_path: str) -> Path:
     base = cfg.BASE_DIR / ("private_assets" if USE_PRIVATE_ASSETS else "assets")
     return (base / relative_path).resolve()
@@ -259,6 +351,12 @@ def copy_and_normalize_to_gen1_parallel(src_files: list[Path], out_dir: Path) ->
 
     def process_num(item: tuple[int, list[Path]]) -> tuple[int, Path, int] | None:
         num, files = item
+        is_homework = getattr(cfg, "MODE", "").lower() == "homework"
+        no_repeat = False
+        try:
+            no_repeat = int(num) in NO_REPEAT_IDS
+        except Exception:
+            pass
         # pick primary: exact match 'N' if present, else first non-underscore, else any
         primary = None
         underscore = None
@@ -278,18 +376,31 @@ def copy_and_normalize_to_gen1_parallel(src_files: list[Path], out_dir: Path) ->
 
         # If running in homework mode, prefer underscore if present and do NOT combine variants.
         try:
-            if getattr(cfg, "MODE", "").lower() == "homework":
+            if is_homework:
                 if underscore is not None:
                     primary = underscore
                 underscore = None
             else:
                 # For lecture, still apply chapter-start no-repeat override
-                if int(num) in NO_REPEAT_IDS:
+                if no_repeat:
                     if underscore is not None:
                         primary = underscore
                     underscore = None
         except Exception:
             pass
+
+        target_name = f"{cfg.LANGUAGE.lower()}_phrasebook_{num}.mp3"
+        target_path = out_dir / target_name
+        if target_path.exists() and target_path.stat().st_size > 0:
+            repeat = 1
+            if underscore is None:
+                try:
+                    repeat = max(1, int(getattr(cfg, "REPEAT_LOCAL_AUDIO", 2)))
+                except Exception:
+                    repeat = 2
+                if is_homework or no_repeat:
+                    repeat = 1
+            return (num, target_path, int(repeat))
 
         head = AudioSegment.silent(duration=int(getattr(cfg, "TRAILING_PAUSE_DURATION", 1) * 1000))
         trailing = AudioSegment.silent(duration=int(getattr(cfg, "TRAILING_PAUSE_DURATION", 1) * 1000))
@@ -307,10 +418,10 @@ def copy_and_normalize_to_gen1_parallel(src_files: list[Path], out_dir: Path) ->
             except Exception:
                 repeat = 2
             try:
-                if getattr(cfg, "MODE", "").lower() == "homework":
+                if is_homework:
                     repeat = 1
                 else:
-                    if int(num) in NO_REPEAT_IDS:
+                    if no_repeat:
                         repeat = 1
             except Exception:
                 pass
@@ -323,8 +434,6 @@ def copy_and_normalize_to_gen1_parallel(src_files: list[Path], out_dir: Path) ->
             combined = normalize(head + trimmed_a1 + inner + trimmed_a2 + trailing)
             repeat = 1
 
-        target_name = f"{cfg.LANGUAGE.lower()}_phrasebook_{num}.mp3"
-        target_path = out_dir / target_name
         combined.export(target_path, format="mp3", bitrate="192k")
         return (num, target_path, int(repeat))
 
@@ -520,19 +629,20 @@ def merge_bilingual_padded(eng_dir: Path, local_padded_dir: Path, out_dir: Path,
         local_seg = remove_trailing_silence(AudioSegment.from_file(f))
         if eng:
             eng_seg = remove_trailing_silence(AudioSegment.from_file(eng))
-            if mode == 'lecture':
-                parts.append(eng_seg)
-                parts.append(mid)
-                parts.append(local_seg)
-            else:
-                # homework: local repeated before English
-                parts.append(local_seg)
-                parts.append(mid)
-                parts.append(local_seg)
-                parts.append(mid)
-                parts.append(eng_seg)
         else:
+            # If English is missing, reuse local audio for the English slot.
+            eng_seg = local_seg
+        if mode == 'lecture':
+            parts.append(eng_seg)
+            parts.append(mid)
             parts.append(local_seg)
+        else:
+            # homework: local repeated before English (or local-as-English)
+            parts.append(local_seg)
+            parts.append(mid)
+            parts.append(local_seg)
+            parts.append(mid)
+            parts.append(eng_seg)
         parts.append(head)
         combined = sum(parts, AudioSegment.silent(duration=0))
         (out_dir / out_name).parent.mkdir(parents=True, exist_ok=True)
@@ -570,18 +680,19 @@ def merge_bilingual_padded_parallel(eng_dir: Path, local_padded_dir: Path, out_d
         local_seg = remove_trailing_silence(AudioSegment.from_file(f))
         if eng:
             eng_seg = remove_trailing_silence(AudioSegment.from_file(eng))
-            if mode == "lecture":
-                parts.append(eng_seg)
-                parts.append(mid)
-                parts.append(local_seg)
-            else:
-                parts.append(local_seg)
-                parts.append(mid)
-                parts.append(local_seg)
-                parts.append(mid)
-                parts.append(eng_seg)
+        else:
+            # If English is missing, reuse local audio for the English slot.
+            eng_seg = local_seg
+        if mode == "lecture":
+            parts.append(eng_seg)
+            parts.append(mid)
+            parts.append(local_seg)
         else:
             parts.append(local_seg)
+            parts.append(mid)
+            parts.append(local_seg)
+            parts.append(mid)
+            parts.append(eng_seg)
         parts.append(head)
 
         combined = sum(parts, AudioSegment.silent(duration=0))
@@ -740,6 +851,11 @@ if __name__ == "__main__":
     eng_dir = get_asset_path("EnglishOnly")
     base_results = get_asset_path(f"Languages/{LOCAL_LANG_TITLE}Phrasebook/Results_Audios")
 
+    REBUILD_ALL = bool(getattr(cfg, "REBUILD_ALL", False))
+    _env_rebuild = os.getenv("REBUILD_ALL", os.getenv("FORCE_REBUILD"))
+    if _env_rebuild is not None:
+        REBUILD_ALL = str(_env_rebuild).strip().lower() not in ("0", "false", "no", "off", "")
+
     # target folders for 3 levels
     normalized_dir = base_results / f"{cfg.MODE}_gen1_normalized"
     padded_dir = base_results / f"{cfg.MODE}_gen2_normalized_padded"
@@ -752,19 +868,20 @@ if __name__ == "__main__":
     possible_original = local_lang_dir / "original_audios"
     source_dir = possible_original if possible_original.exists() else local_lang_dir
 
-    # Clean previous generated folders for a fresh run
-    for d in (
-        normalized_dir,
-        padded_dir,
-        bilingual_dir,
-        base_results / "bilingual_sentences_chapters",
-        base_results / "homework_bilingual_sentences_chapters",
-    ):
-        try:
-            if d.exists():
-                shutil.rmtree(d)
-        except Exception:
-            pass
+    # Clean previous generated folders only when rebuilding is requested.
+    if REBUILD_ALL:
+        for d in (
+            normalized_dir,
+            padded_dir,
+            bilingual_dir,
+            base_results / "bilingual_sentences_chapters",
+            base_results / "homework_bilingual_sentences_chapters",
+        ):
+            try:
+                if d.exists():
+                    shutil.rmtree(d)
+            except Exception:
+                pass
 
     # Ensure the standard result folders exist at Results_Audios/*
     for d in (
@@ -916,19 +1033,31 @@ if __name__ == "__main__":
             end_id = None
 
         selected_ids = getattr(cfg, "SELECTED_SENTENCE_IDS", None)
+        filtered = all_src
         if selected_ids:
-            before = len(all_src)
-            all_src = [p for p in all_src if (n := get_digits_numbers_from_string(p.name)) is not None and n in selected_ids]
-            logging.info(f"Filtering explicit IDs: {len(selected_ids)} ids ({before} files -> {len(all_src)} files)")
+            before = len(filtered)
+            filtered = [p for p in filtered if (n := get_digits_numbers_from_string(p.name)) is not None and n in selected_ids]
+            logging.info(f"Filtering explicit IDs: {len(selected_ids)} ids ({before} files -> {len(filtered)} files)")
         elif start_id is not None or end_id is not None:
             lo = start_id if start_id is not None else -1_000_000_000
             hi = end_id if end_id is not None else 1_000_000_000
-            before = len(all_src)
-            all_src = [p for p in all_src if (n := get_digits_numbers_from_string(p.name)) is not None and lo <= n <= hi]
-            logging.info(f"Filtering IDs: {lo}..{hi} ({before} files -> {len(all_src)} files)")
+            before = len(filtered)
+            filtered = [p for p in filtered if (n := get_digits_numbers_from_string(p.name)) is not None and lo <= n <= hi]
+            logging.info(f"Filtering IDs: {lo}..{hi} ({before} files -> {len(filtered)} files)")
+        if mode == "homework":
+            before = len(filtered)
+            filtered = [p for p in filtered if (n := get_digits_numbers_from_string(p.name)) is not None and n not in NO_REPEAT_IDS]
+            logging.info(f"Homework filter (drop first two per chapter): {before} -> {len(filtered)} files")
+        all_src = filtered
 
         # Gen1: normalized copies with naming local_phrasebook_N (also returns repeat_map)
         gen1_files, gen1_repeat_map = copy_and_normalize_to_gen1_parallel(all_src, normalized_dir)
+
+        # Optional denoise (off by default)
+        if bool(getattr(cfg, "USE_DF_NOISE_REDUCTION", False)):
+            denoise_files_deepfilternet(gen1_files)
+        elif bool(getattr(cfg, "USE_NN_NOISE_REDUCTION", False)):
+            denoise_files_ffmpeg(gen1_files)
 
         # Gen2: padded normalized files (use per-file repeat override)
         export_padded_audios_parallel(gen1_files, padded_dir, repeat_map=gen1_repeat_map)

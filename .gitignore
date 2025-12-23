@@ -32,6 +32,7 @@ private_assets/
 tmp-*.m4a # temp audio created by MoviePy
 *.tmp.mp4 # temp video before rename
 *.csv
+*.xlsx
 *.sqlite
 *.db
 *MPY_wvf_snd*

@@ -225,6 +225,9 @@ if __name__ == "__main__":
 
     def process(f: Path):
         try:
+            out_path = OUTPUT_DIR / f"{f.stem}_bg{f.suffix}"
+            if out_path.exists():
+                return f"Skipped (already exists): {out_path.name}"
             logging.info(f"🎬 Adding background music: {f.name}")
             if f.suffix.lower() in ['.mp4', '.mov', '.avi']:
                 out = add_bg_music_to_video(f, MUSIC_PATH, OUTPUT_DIR, music_gain_db=MUSIC_GAIN_DB)

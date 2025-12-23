@@ -565,20 +565,31 @@ def create_video_clip(sentence: Dict):
 
     local_audio_path = LOCAL_AUDIO_DIR / sentence["local_audio"]
     english_audio_path = ENG_AUDIO_DIR / sentence["english_audio"]
-    if not local_audio_path.exists() or not english_audio_path.exists():
-        print(f"⚠ Missing audio for sentence {sentence['id']}")
+    if not local_audio_path.exists():
+        print(f"⚠ Missing local audio for sentence {sentence['id']}")
         return
 
     local_audio = AudioFileClip(str(local_audio_path))
-    english_audio = AudioFileClip(str(english_audio_path))
+    english_missing = not english_audio_path.exists()
+    if english_missing:
+        print(f"⚠ Missing English audio for sentence {sentence['id']}; using local only")
+        english_audio = local_audio
+    else:
+        english_audio = AudioFileClip(str(english_audio_path))
 
     # --- Audio sequencing ---
     if MODE.lower() == "lecture":
-        total_duration = english_audio.duration + INNER_PAUSE_DURATION + local_audio.duration + TRAILING_PAUSE_DURATION
-        audio = CompositeAudioClip([
-            english_audio.set_start(0),
-            local_audio.set_start(english_audio.duration + INNER_PAUSE_DURATION),
-        ])
+        if english_missing:
+            total_duration = local_audio.duration + TRAILING_PAUSE_DURATION
+            audio = CompositeAudioClip([
+                local_audio.set_start(0),
+            ])
+        else:
+            total_duration = english_audio.duration + INNER_PAUSE_DURATION + local_audio.duration + TRAILING_PAUSE_DURATION
+            audio = CompositeAudioClip([
+                english_audio.set_start(0),
+                local_audio.set_start(english_audio.duration + INNER_PAUSE_DURATION),
+            ])
         
         #Preview audio
         # audio.fps = 44100 
