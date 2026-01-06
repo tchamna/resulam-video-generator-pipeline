@@ -7,8 +7,8 @@ import os
 # Set Language, Mode, Env
 # Use Private Assets or Normal Assets
 ##############################################################
-LANGUAGE = "Ewondo"         # e.g., "Duala", "Nufi", "Yoruba", "Ewondo"
-# LANGUAGE = "Bamoun"         # e.g., "Duala", "Nufi", "Yoruba"
+# LANGUAGE = "Ewondo"         # e.g., "Duala", "Nufi", "Yoruba", "Ewondo"
+LANGUAGE = "Yemba"         # e.g., "Duala", "Nufi", "Yoruba"
 
 # MODE = "homework"          # "lecture" or "homework"
 ENV = "production"         # "production" or "test"
@@ -135,8 +135,12 @@ INTRO_MESSAGES = {
 DEFAULT_INTRO = "Listen, repeat and translate:"
 
 # Optional path overrides
-# FONT_PATH = "Fonts/arialbd.ttf"
-FONT_PATH = BASE_DIR / "assets" / "Fonts" / "CharisSIL-B.ttf"
+# FONT_PATH_BASIC = "Fonts/arialbd.ttf"
+# FONT_PATH_SPECIAL = "Fonts/CharisSIL-B.ttf"
+FONT_PATH_BASIC = BASE_DIR / "assets" / "Fonts" / "CharisSIL-B.ttf"
+FONT_PATH_SPECIAL = BASE_DIR / "assets" / "Fonts" / "arialbd.ttf"
+# Backward-compatible default
+FONT_PATH = FONT_PATH_BASIC
 
 LOGO_PATH = "resulam_logo_resurrectionLangue.png"
 LOG_DIR = f"Languages/{LANGUAGE}Phrasebook/Logs"

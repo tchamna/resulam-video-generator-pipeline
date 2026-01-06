@@ -840,6 +840,68 @@ def concatenate_chapters(base_results: Path, bilingual_output_path: Path, chapte
                 logging.error(f"Failed to export chapter {chap}: {e}")
 
 
+def _resolve_music_path(lang_base_dir: Path) -> Path | None:
+    name = getattr(cfg, "MUSIC_FILENAME", f"{cfg.LANGUAGE.lower()}_music_background.mp3")
+    path = lang_base_dir / name
+    if path.exists():
+        return path
+    if path.suffix == "":
+        alt = lang_base_dir / f"{name}.mp3"
+        if alt.exists():
+            return alt
+    return None
+
+
+def add_background_music_to_chapters(base_results: Path, lang_base_dir: Path, *, mode: str) -> None:
+    if mode == "homework":
+        in_dir = base_results / "homework_bilingual_sentences_chapters"
+        out_dir = base_results / "homework_bilingual_sentences_chapters_background"
+    else:
+        in_dir = base_results / "bilingual_sentences_chapters"
+        out_dir = base_results / "bilingual_sentences_chapters_background"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    music_path = _resolve_music_path(lang_base_dir)
+    if not music_path:
+        logging.warning(f"Background music not found; skipping. (dir={lang_base_dir})")
+        return
+
+    files = sorted(in_dir.glob("*.mp3"), key=lambda p: p.name.lower())
+    if not files:
+        logging.info(f"No chapter audios found in {in_dir}")
+        return
+
+    music_gain_db = float(getattr(cfg, "MUSIC_GAIN_DB", -20.0))
+    max_workers = min(_get_max_workers(), len(files))
+
+    def process_one(src: Path) -> None:
+        dest = out_dir / src.name
+        if dest.exists():
+            return
+        try:
+            speech = AudioSegment.from_file(src)
+            music = AudioSegment.from_file(music_path) + music_gain_db
+            if music.duration_seconds <= 0:
+                logging.warning(f"Background music is empty: {music_path}")
+                return
+            loops = int(speech.duration_seconds // music.duration_seconds) + 1
+            music_looped = (music * loops)[: len(speech)]
+            mixed = speech.overlay(music_looped)
+            mixed.export(dest, format="mp3", bitrate="192k")
+        except Exception as e:
+            logging.error(f"Failed background mix {src.name}: {e}")
+
+    logging.info(f"Adding background music to chapters: {len(files)} files -> {out_dir}")
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(process_one, f): f for f in files}
+        for fut in as_completed(futures):
+            f = futures[fut]
+            try:
+                fut.result()
+            except Exception as e:
+                logging.error(f"Background mix error {f}: {e}")
+
+
 # `merge_variant` removed (mixed_variant outputs are no longer generated).
 
 
@@ -847,6 +909,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
     LOCAL_LANG_TITLE = cfg.LANGUAGE.title()
+    lang_base_dir = get_asset_path(f"Languages/{LOCAL_LANG_TITLE}Phrasebook")
     local_lang_dir = get_asset_path(f"Languages/{LOCAL_LANG_TITLE}Phrasebook/{LOCAL_LANG_TITLE}Only")
     eng_dir = get_asset_path("EnglishOnly")
     base_results = get_asset_path(f"Languages/{LOCAL_LANG_TITLE}Phrasebook/Results_Audios")
@@ -876,6 +939,8 @@ if __name__ == "__main__":
             bilingual_dir,
             base_results / "bilingual_sentences_chapters",
             base_results / "homework_bilingual_sentences_chapters",
+            base_results / "bilingual_sentences_chapters_background",
+            base_results / "homework_bilingual_sentences_chapters_background",
         ):
             try:
                 if d.exists():
@@ -890,6 +955,8 @@ if __name__ == "__main__":
         bilingual_dir,
         base_results / "bilingual_sentences_chapters",
         base_results / "homework_bilingual_sentences_chapters",
+        base_results / "bilingual_sentences_chapters_background",
+        base_results / "homework_bilingual_sentences_chapters_background",
     ):
         try:
             d.mkdir(parents=True, exist_ok=True)
@@ -1071,5 +1138,8 @@ if __name__ == "__main__":
 
         # Concatenate per chapter (creates Results_Audios/bilingual_sentences_chapters)
         concatenate_chapters(base_results, bilingual_dir, chapter_ranges, target_ids)
+
+        # Add background music to chapter audios
+        add_background_music_to_chapters(base_results, lang_base_dir, mode=mode)
 
         logging.info("Pipeline complete.")

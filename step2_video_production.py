@@ -128,22 +128,23 @@ def get_asset_path(relative_path: str) -> Path:
 # FONT_PATH = BASE_DIR / "assets"/ "Fonts" / "arialbd.ttf"
 # LOGO_PATH = BASE_DIR/ "assets" / "resulam_logo_resurrectionLangue.png"
 
-# Resolve FONT_PATH: if the config provided an absolute/existing path, prefer it;
-# otherwise treat it as a relative path under the selected assets folder.
-try:
-    cfg_font = cfg.FONT_PATH
-except Exception:
-    cfg_font = None
+def _resolve_font_path(cfg_value, default_relative: str) -> Path:
+    # If config provided an absolute/existing path, prefer it; otherwise treat as relative.
+    if cfg_value:
+        candidate = Path(cfg_value)
+        if candidate.exists():
+            return candidate
+        return get_asset_path(str(cfg_value))
+    return get_asset_path(default_relative)
 
-if cfg_font:
-    candidate = Path(cfg_font)
-    if candidate.exists():
-        FONT_PATH = candidate
-    else:
-        # if cfg.FONT_PATH was given as a relative path string, resolve inside assets/private_assets
-        FONT_PATH = get_asset_path(str(cfg_font))
-else:
-    FONT_PATH = get_asset_path("Fonts/arialbd.ttf")
+cfg_font_basic = getattr(cfg, "FONT_PATH_BASIC", None) or getattr(cfg, "FONT_PATH", None)
+cfg_font_special = getattr(cfg, "FONT_PATH_SPECIAL", None) or getattr(cfg, "FONT_PATH", None)
+
+BASIC_FONT_PATH = _resolve_font_path(cfg_font_basic, "Fonts/CharisSIL-B.ttf")
+SPECIAL_FONT_PATH = _resolve_font_path(cfg_font_special, "Fonts/arialbd.ttf")
+
+# Backward-compatible default (tools may import FONT_PATH directly)
+FONT_PATH = BASIC_FONT_PATH
 
 LOGO_PATH = get_asset_path("resulam_logo_resurrectionLangue.png")
 
@@ -231,7 +232,20 @@ logging.info(
     "Text rendering backend: %s",
     "ImageMagick/TextClip" if USE_IMAGEMAGICK else "Pillow (bundled TTF)",
 )
-logging.info("FONT_PATH: %s (exists=%s)", str(FONT_PATH), Path(FONT_PATH).exists())
+logging.info("FONT_PATH_BASIC: %s (exists=%s)", str(BASIC_FONT_PATH), Path(BASIC_FONT_PATH).exists())
+logging.info("FONT_PATH_SPECIAL: %s (exists=%s)", str(SPECIAL_FONT_PATH), Path(SPECIAL_FONT_PATH).exists())
+
+
+_SPECIAL_FONT_NEEDLES = ["ε", "έ", "ɛ̀", "ɛ̄", "ɛ̌", "ɛ̂"]
+
+
+def _sentence_needs_special_font(sentence: Dict) -> bool:
+    parts = [
+        str(sentence.get("source", "")),
+        str(sentence.get("english", "")),
+        str(sentence.get("french", "")),
+    ]
+    return any(n in part for part in parts for n in _SPECIAL_FONT_NEEDLES)
 
 
 def format_elapsed(seconds: float) -> str:
@@ -618,6 +632,7 @@ def create_video_clip(sentence: Dict):
 
     # --- Font & spacing ---
     font_size = calculate_font_size(sentence)
+    font_path = SPECIAL_FONT_PATH if _sentence_needs_special_font(sentence) else BASIC_FONT_PATH
     y_position_lecture = 120
     y_position_homework = 120
 
@@ -625,17 +640,17 @@ def create_video_clip(sentence: Dict):
     clips = [bg]
 
     # --- Header row ---
-    lang_clip = make_text_clip(LANGUAGE.title(), font=FONT_PATH,
+    lang_clip = make_text_clip(LANGUAGE.title(), font=font_path,
                                fontsize=int(font_size * 0.55), color="yellow", method="label")
     lang_clip = lang_clip.set_position((15, MARGIN_TOP)).set_duration(total_duration)
     clips.append(lang_clip)
 
-    support_clip = make_text_clip("Please Support Resulam", font=FONT_PATH,
+    support_clip = make_text_clip("Please Support Resulam", font=font_path,
                                  fontsize=int(font_size * 0.5), color="yellow", method="label")
     support_clip = support_clip.set_position(("right", MARGIN_TOP)).set_duration(total_duration)
     clips.append(support_clip)
     # Use make_text_clip for the numeric badge so fallback works if TextClip can't render
-    num_clip = make_text_clip(str(sentence["id"]), font=FONT_PATH,
+    num_clip = make_text_clip(str(sentence["id"]), font=font_path,
                               fontsize=int(font_size * 0.6), color="white", method="label")
     num_clip = num_clip.set_position(
         (VIDEO_RESOLUTION[0] - num_clip.w - MARGIN_RIGHT, MARGIN_TOP + support_clip.h + 10)
@@ -656,7 +671,7 @@ def create_video_clip(sentence: Dict):
                 (sentence["english"], "yellow"),
                 (sentence["french"], "white"),
             ],
-            font=FONT_PATH,
+            font=font_path,
             fontsize=font_size,
             max_width=max_width,
             max_height=max_block_h,
@@ -681,13 +696,13 @@ def create_video_clip(sentence: Dict):
         current_y = y_position_homework
 
         # Intro
-        intro_clip = make_text_clip(intro_msg, font=FONT_PATH, fontsize=int(font_size*0.9),
+        intro_clip = make_text_clip(intro_msg, font=font_path, fontsize=int(font_size*0.9),
                          color="white", method="label")
         intro_clip = intro_clip.set_position(("center", current_y)).set_start(0).set_duration(local_lang_2_start)
         clips.append(intro_clip)
         current_y += intro_clip.h + 10
 
-        repeat_clip = make_text_clip("Listen, repeat and translate", font=FONT_PATH, fontsize=font_size,
+        repeat_clip = make_text_clip("Listen, repeat and translate", font=font_path, fontsize=font_size,
                          color="yellow", method="label")
         repeat_clip = repeat_clip.set_position(("center", current_y)).set_start(0).set_duration(local_lang_2_start)
         clips.append(repeat_clip)
@@ -703,7 +718,7 @@ def create_video_clip(sentence: Dict):
                 (sentence["english"], "yellow"),
                 (sentence["french"], "white"),
             ],
-            font=FONT_PATH,
+            font=font_path,
             fontsize=font_size,
             max_width=max_width,
             max_height=max_block_h,
@@ -713,7 +728,7 @@ def create_video_clip(sentence: Dict):
         src_tmp, eng_tmp, fr_tmp = caption_clips
 
         # Second playback → only local
-        src_clip2 = make_text_clip(sentence["source"], font=FONT_PATH, fontsize=caption_fs,
+        src_clip2 = make_text_clip(sentence["source"], font=font_path, fontsize=caption_fs,
                        color="white", method="caption", size=(VIDEO_RESOLUTION[0]-200, None))
         src_clip2 = src_clip2.set_position(("center", y_position_homework)).set_start(local_lang_2_start).set_duration(local_lang_3_start - local_lang_2_start)
         clips.append(src_clip2)
