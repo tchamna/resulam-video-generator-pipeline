@@ -403,6 +403,9 @@ class PhrasebookProcessor:
             # Apply replacements
             df = df.applymap(lambda x: apply_multi_replacements(str(x), ALL_REPLACEMENTS))
 
+            # Ensure space before '(' when directly attached: akye(Maakye → akye (Maakye, toi.(Sers → toi. (Sers
+            df = df.applymap(lambda x: re.sub(r'(?<=\S)\(', ' (', str(x)) if isinstance(x, str) else x)
+
             # Strip whitespace
             df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
 

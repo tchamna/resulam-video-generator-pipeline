@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydub import AudioSegment, silence
 from pydub.silence import detect_nonsilent
 from collections import defaultdict
+from natsort import natsorted
 import step0_config as cfg
 
 
@@ -88,6 +89,15 @@ def _get_max_workers() -> int:
 
     cpu = os.cpu_count() or 1
     return max(1, cpu // 2)
+
+
+def remove_trailing_silence(audio_segment: AudioSegment, silence_thresh=-50, chunk_size=10) -> AudioSegment:
+    """Aggressively remove leading and trailing silence using detect_nonsilent with small chunk_size."""
+    ranges = detect_nonsilent(audio_segment, min_silence_len=chunk_size, silence_thresh=silence_thresh)
+    if not ranges:
+        return AudioSegment.silent(duration=0)
+    s, e = ranges[0][0], ranges[-1][1]
+    return audio_segment[s:e]
 
 
 def _try_ffmpeg_concat_mp3(input_files: list[Path], output_path: Path, *, reencode_bitrate: str = "192k") -> bool:
@@ -357,6 +367,12 @@ def copy_and_normalize_to_gen1_parallel(src_files: list[Path], out_dir: Path) ->
             no_repeat = int(num) in NO_REPEAT_IDS
         except Exception:
             pass
+        
+        # Get audio source preference from config
+        audio_source = getattr(cfg, "AUDIO_SOURCE", "secondary").lower()
+        if audio_source not in ("primary", "secondary", "both"):
+            audio_source = "secondary"
+        
         # pick primary: exact match 'N' if present, else first non-underscore, else any
         primary = None
         underscore = None
@@ -374,26 +390,45 @@ def copy_and_normalize_to_gen1_parallel(src_files: list[Path], out_dir: Path) ->
         if primary is None:
             primary = files[0]
 
-        # If running in homework mode, prefer underscore if present and do NOT combine variants.
-        try:
-            if is_homework:
+        # Select audio based on AUDIO_SOURCE config and mode
+        chosen_primary = primary
+        chosen_underscore = underscore
+        
+        if is_homework:
+            # Homework mode: use AUDIO_SOURCE preference
+            if audio_source == "primary":
+                chosen_underscore = None
+            elif audio_source == "secondary":
                 if underscore is not None:
-                    primary = underscore
-                underscore = None
+                    chosen_primary = underscore
+                    chosen_underscore = None
+            elif audio_source == "both":
+                # Keep both for concatenation
+                pass
+        else:
+            # Lecture mode: apply chapter-start no-repeat override
+            if no_repeat:
+                if audio_source == "secondary" and underscore is not None:
+                    chosen_primary = underscore
+                    chosen_underscore = None
+                elif audio_source == "primary":
+                    chosen_underscore = None
+                # For "both" mode, keep both
             else:
-                # For lecture, still apply chapter-start no-repeat override
-                if no_repeat:
+                # Regular lecture sentences: use AUDIO_SOURCE preference
+                if audio_source == "primary":
+                    chosen_underscore = None
+                elif audio_source == "secondary":
                     if underscore is not None:
-                        primary = underscore
-                    underscore = None
-        except Exception:
-            pass
+                        chosen_primary = underscore
+                        chosen_underscore = None
+                # For "both" mode, keep both
 
         target_name = f"{cfg.LANGUAGE.lower()}_phrasebook_{num}.mp3"
         target_path = out_dir / target_name
         if target_path.exists() and target_path.stat().st_size > 0:
             repeat = 1
-            if underscore is None:
+            if chosen_underscore is None:
                 try:
                     repeat = max(1, int(getattr(cfg, "REPEAT_LOCAL_AUDIO", 2)))
                 except Exception:
@@ -402,36 +437,64 @@ def copy_and_normalize_to_gen1_parallel(src_files: list[Path], out_dir: Path) ->
                     repeat = 1
             return (num, target_path, int(repeat))
 
-        head = AudioSegment.silent(duration=int(getattr(cfg, "TRAILING_PAUSE_DURATION", 1) * 1000))
-        trailing = AudioSegment.silent(duration=int(getattr(cfg, "TRAILING_PAUSE_DURATION", 1) * 1000))
+        # Always use exactly 1 second head and tail silence
+        one_sec = AudioSegment.silent(duration=1000)
 
-        if underscore is None:
-            a1 = AudioSegment.from_file(primary)
-            trimmed_a1 = trim_leading_trailing(a1)
-            combined = normalize(head + trimmed_a1 + trailing)
+        if chosen_underscore is None:
+            # Only primary (or primary+fallback to underscore if corrupted)
+            a1 = None
+            try:
+                a1 = AudioSegment.from_file(chosen_primary)
+            except Exception as e_primary:
+                logging.warning(f"⚠ Primary {chosen_primary.name} is corrupted, trying underscore: {e_primary}")
+                if underscore and underscore.exists():
+                    try:
+                        a1 = AudioSegment.from_file(underscore)
+                        chosen_primary = underscore
+                    except Exception as e_underscore:
+                        logging.error(f"✗ Underscore {underscore.name} also corrupted: {e_underscore}")
+                        raise
+            
+            if a1:
+                trimmed_a1 = remove_trailing_silence(a1)
+                combined = normalize(one_sec + trimmed_a1 + one_sec)
 
-            # Repeat behavior for sentence IDs with only one local variant (no "N_.mp3").
-            # Default is 2 in lecture mode (so learners hear the same line twice),
-            # but you can disable duplication by setting cfg.REPEAT_LOCAL_AUDIO = 1.
-            try:
-                repeat = max(1, int(getattr(cfg, "REPEAT_LOCAL_AUDIO", 2)))
-            except Exception:
-                repeat = 2
-            try:
-                if is_homework:
-                    repeat = 1
-                else:
-                    if no_repeat:
+                # Repeat behavior for sentence IDs with only one local variant (no "N_.mp3").
+                # Default is 2 in lecture mode (so learners hear the same line twice),
+                # but you can disable duplication by setting cfg.REPEAT_LOCAL_AUDIO = 1.
+                try:
+                    repeat = max(1, int(getattr(cfg, "REPEAT_LOCAL_AUDIO", 2)))
+                except Exception:
+                    repeat = 2
+                try:
+                    if is_homework:
                         repeat = 1
-            except Exception:
-                pass
+                    else:
+                        if no_repeat:
+                            repeat = 1
+                except Exception:
+                    pass
+            else:
+                raise Exception(f"Could not load audio from {chosen_primary} or underscore variant")
         else:
-            a1 = AudioSegment.from_file(primary)
-            a2 = AudioSegment.from_file(underscore)
-            trimmed_a1 = trim_leading_trailing(a1)
-            trimmed_a2 = trim_leading_trailing(a2)
+            # Both variants (primary + underscore)
+            a1 = None
+            try:
+                a1 = AudioSegment.from_file(chosen_primary)
+            except Exception as e_primary:
+                logging.warning(f"⚠ Primary {chosen_primary.name} is corrupted, trying underscore: {e_primary}")
+                try:
+                    a1 = AudioSegment.from_file(chosen_underscore)
+                    chosen_primary = chosen_underscore
+                except Exception as e_underscore:
+                    logging.error(f"✗ Underscore {chosen_underscore.name} also corrupted: {e_underscore}")
+                    raise
+            
+            a2 = AudioSegment.from_file(chosen_underscore)
+            trimmed_a1 = remove_trailing_silence(a1) if a1 else None
+            trimmed_a2 = remove_trailing_silence(a2)
             inner = AudioSegment.silent(duration=int(getattr(cfg, "INNER_PAUSE_DURATION", 3) * 1000))
-            combined = normalize(head + trimmed_a1 + inner + trimmed_a2 + trailing)
+            combined = normalize(one_sec + trimmed_a1 + inner + trimmed_a2 + one_sec)
             repeat = 1
 
         combined.export(target_path, format="mp3", bitrate="192k")
@@ -453,7 +516,7 @@ def copy_and_normalize_to_gen1_parallel(src_files: list[Path], out_dir: Path) ->
             except Exception as e:
                 logging.error(f"ƒ?O Copy/normalize {num}: {e}")
 
-    produced.sort(key=lambda p: get_digits_numbers_from_string(p.name) or 0)
+    produced = natsorted(produced, key=lambda p: p.name)
     return produced, repeat_map
 
 
@@ -575,19 +638,22 @@ def export_padded_audios_parallel(files_to_process: list[Path], out_dir: Path, r
                     pass
 
         seg = AudioSegment.from_file(src_path)
-        trimmed = trim_leading_trailing(seg)
+        trimmed = remove_trailing_silence(seg)
+        
+        # Always use exactly 1 second head and tail silence
+        one_sec = AudioSegment.silent(duration=1000)
 
         if repeat <= 1:
-            final = head + trimmed + trailing
+            final = one_sec + trimmed + one_sec
         elif repeat == 2:
-            final = head + trimmed + inner + trimmed + trailing
+            final = one_sec + trimmed + inner + trimmed + one_sec
         else:
-            parts = [head]
+            parts = [one_sec]
             for i in range(repeat):
                 parts.append(trimmed)
                 if i < repeat - 1:
                     parts.append(inner)
-            parts.append(trailing)
+            parts.append(one_sec)
             final = sum(parts, AudioSegment.silent(duration=0))
 
         final = normalize(final)
@@ -609,42 +675,41 @@ def merge_bilingual_padded(eng_dir: Path, local_padded_dir: Path, out_dir: Path,
     existing = {f.name for f in out_dir.glob("*.mp3")}
     eng_files = get_audio(eng_dir)
     eng_map = {get_digits_numbers_from_string(f.name): f for f in eng_files if get_digits_numbers_from_string(f.name)}
-    local_files = list(local_padded_dir.glob("*_padded.mp3"))
+    local_files = natsorted(list(local_padded_dir.glob("*_padded.mp3")), key=lambda p: p.name)
 
-    head = AudioSegment.silent(duration=int(getattr(cfg, 'TRAILING_PAUSE_DURATION', 1) * 1000))
     # Use homework-specific inner pause if in homework mode
     inner_secs = float(getattr(cfg, 'INNER_PAUSE_DURATION_HW', getattr(cfg, 'INNER_PAUSE_DURATION', 3))) if mode == 'homework' else float(getattr(cfg, 'INNER_PAUSE_DURATION', 3))
     mid = AudioSegment.silent(duration=int(inner_secs * 1000))
 
-    for f in sorted(local_files, key=lambda p: p.name):
+    # Always use exactly 1 second head and tail silence
+    one_sec = AudioSegment.silent(duration=1000)
+
+    for f in local_files:
         num = get_digits_numbers_from_string(f.name)
         if num is None:
             continue
         eng = eng_map.get(num)
-        # prefix with 'english_' to create unique paired filename preserving variant suffix
         out_name = f"english_{f.name}"
         if out_name in existing:
             continue
-        parts = [head]
+
+        # Strip ALL silence from inputs so we control head/tail exactly
         local_seg = remove_trailing_silence(AudioSegment.from_file(f))
         if eng:
             eng_seg = remove_trailing_silence(AudioSegment.from_file(eng))
         else:
-            # If English is missing, reuse local audio for the English slot.
-            eng_seg = local_seg
+            # If English is missing, skip the English+mid portion entirely
+            logging.warning(f"⚠ English audio missing for sentence {num}, skipping English segment")
+            eng_seg = None
+
+        # Build: 1s head + content + 1s tail
         if mode == 'lecture':
-            parts.append(eng_seg)
-            parts.append(mid)
-            parts.append(local_seg)
+            if eng_seg is not None:
+                combined = one_sec + eng_seg + mid + local_seg + one_sec
+            else:
+                combined = one_sec + local_seg + one_sec
         else:
-            # homework: local repeated before English (or local-as-English)
-            parts.append(local_seg)
-            parts.append(mid)
-            parts.append(local_seg)
-            parts.append(mid)
-            parts.append(eng_seg)
-        parts.append(head)
-        combined = sum(parts, AudioSegment.silent(duration=0))
+            combined = one_sec + local_seg + one_sec
         (out_dir / out_name).parent.mkdir(parents=True, exist_ok=True)
         combined.export(out_dir / out_name, format="mp3", bitrate="192k")
 
@@ -654,15 +719,18 @@ def merge_bilingual_padded_parallel(eng_dir: Path, local_padded_dir: Path, out_d
     existing = {f.name for f in out_dir.glob("*.mp3")}
     eng_files = get_audio(eng_dir)
     eng_map = {get_digits_numbers_from_string(f.name): f for f in eng_files if get_digits_numbers_from_string(f.name)}
-    local_files = sorted(list(local_padded_dir.glob("*_padded.mp3")), key=lambda p: p.name)
+    local_files = natsorted(list(local_padded_dir.glob("*_padded.mp3")), key=lambda p: p.name)
 
-    head = AudioSegment.silent(duration=int(getattr(cfg, "TRAILING_PAUSE_DURATION", 1) * 1000))
+    # Use homework-specific inner pause if in homework mode
     inner_secs = (
         float(getattr(cfg, "INNER_PAUSE_DURATION_HW", getattr(cfg, "INNER_PAUSE_DURATION", 3)))
         if mode == "homework"
         else float(getattr(cfg, "INNER_PAUSE_DURATION", 3))
     )
     mid = AudioSegment.silent(duration=int(inner_secs * 1000))
+
+    # Always use exactly 1 second head and tail silence
+    one_sec = AudioSegment.silent(duration=1000)
 
     max_workers = _get_max_workers()
 
@@ -676,26 +744,23 @@ def merge_bilingual_padded_parallel(eng_dir: Path, local_padded_dir: Path, out_d
         if out_name in existing or dest.exists():
             return
 
-        parts = [head]
+        # Strip ALL silence from inputs so we control head/tail exactly
         local_seg = remove_trailing_silence(AudioSegment.from_file(f))
         if eng:
             eng_seg = remove_trailing_silence(AudioSegment.from_file(eng))
         else:
-            # If English is missing, reuse local audio for the English slot.
-            eng_seg = local_seg
-        if mode == "lecture":
-            parts.append(eng_seg)
-            parts.append(mid)
-            parts.append(local_seg)
-        else:
-            parts.append(local_seg)
-            parts.append(mid)
-            parts.append(local_seg)
-            parts.append(mid)
-            parts.append(eng_seg)
-        parts.append(head)
+            # If English is missing, skip the English+mid portion entirely
+            logging.warning(f"⚠ English audio missing for sentence {num}, skipping English segment")
+            eng_seg = None
 
-        combined = sum(parts, AudioSegment.silent(duration=0))
+        # Build: 1s head + content + 1s tail
+        if mode == "lecture":
+            if eng_seg is not None:
+                combined = one_sec + eng_seg + mid + local_seg + one_sec
+            else:
+                combined = one_sec + local_seg + one_sec
+        else:
+            combined = one_sec + local_seg + one_sec
         dest.parent.mkdir(parents=True, exist_ok=True)
         combined.export(dest, format="mp3", bitrate="192k")
 
@@ -740,7 +805,7 @@ def concatenate_chapters(base_results: Path, bilingual_output_path: Path, chapte
     combined_chapters_audio_folder.mkdir(parents=True, exist_ok=True)
 
     bilingual_files = list(bilingual_output_path.glob("*.mp3"))
-    bilingual_files.sort(key=lambda p: (get_digits_numbers_from_string(p.name) or 0, p.name.lower()))
+    bilingual_files = natsorted(bilingual_files, key=lambda p: p.name)
 
     chapter_range_by_name = {chap: (start, end) for start, end, chap in chapter_ranges}
 
@@ -771,7 +836,8 @@ def concatenate_chapters(base_results: Path, bilingual_output_path: Path, chapte
 
     # Ensure deterministic ordering inside each chapter (especially Chap1 where lexicographic sort breaks numeric order)
     for chap, files in chapter_to_files.items():
-        files.sort(key=lambda p: (get_digits_numbers_from_string(p.name) or 0, p.name.lower()))
+        files_sorted = natsorted(files, key=lambda p: p.name)
+        chapter_to_files[chap] = files_sorted
 
     rng = None
     try:
@@ -866,7 +932,7 @@ def add_background_music_to_chapters(base_results: Path, lang_base_dir: Path, *,
         logging.warning(f"Background music not found; skipping. (dir={lang_base_dir})")
         return
 
-    files = sorted(in_dir.glob("*.mp3"), key=lambda p: p.name.lower())
+    files = natsorted(in_dir.glob("*.mp3"), key=lambda p: p.name)
     if not files:
         logging.info(f"No chapter audios found in {in_dir}")
         return
@@ -947,21 +1013,6 @@ if __name__ == "__main__":
                     shutil.rmtree(d)
             except Exception:
                 pass
-
-    # Ensure the standard result folders exist at Results_Audios/*
-    for d in (
-        normalized_dir,
-        padded_dir,
-        bilingual_dir,
-        base_results / "bilingual_sentences_chapters",
-        base_results / "homework_bilingual_sentences_chapters",
-        base_results / "bilingual_sentences_chapters_background",
-        base_results / "homework_bilingual_sentences_chapters_background",
-    ):
-        try:
-            d.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
 
     def copy_and_normalize_to_gen1(src_files: list[Path], out_dir: Path) -> tuple[list[Path], dict[Path,int]]:
         out_dir.mkdir(parents=True, exist_ok=True)

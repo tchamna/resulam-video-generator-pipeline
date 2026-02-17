@@ -8,7 +8,8 @@ import os
 # Use Private Assets or Normal Assets
 ##############################################################
 # LANGUAGE = "Ewondo"         # e.g., "Duala", "Nufi", "Yoruba", "Ewondo"
-LANGUAGE = "Yemba"         # e.g., "Duala", "Nufi", "Yoruba"
+# LANGUAGE = "Yemba"         # e.g., "Duala", "Nufi", "Yoruba"
+LANGUAGE = "Tshiluba"         # e.g., "Duala", "Nufi", "Yoruba"
 
 # MODE = "homework"          # "lecture" or "homework"
 ENV = "production"         # "production" or "test"
@@ -54,6 +55,16 @@ SHUFFLE_HOMEWORK = True   # or False
 
 SHUFFLE_SEED = None             # or an int like 1234 for reproducible shuffle
 
+# ─── Audio Source Selection ────────────────────────────
+# Controls which audio files to use for local language segments:
+#   "secondary": Use underscore variants (1_.mp3) when available, fallback to primary (1.mp3)
+#   "primary":   Use primary files only (1.mp3), ignore underscore variants (1_.mp3)
+#   "both":      Use both primary and secondary, combine them in the output
+AUDIO_SOURCE = "primary"  # "primary", "secondary", or "both"
+
+# ─── Pipeline Configuration ────────────────────────────
+# Set to True to skip interactive Excel freshness checks and sentence list regeneration prompts
+SKIP_PIPELINE_CHECKS = True  # Set to True to skip Excel/TXT freshness prompts
 
 # Filtering (None = process all)
 # If both sentence and chapter ranges are set, the sentence range is used.
@@ -61,7 +72,7 @@ SHUFFLE_SEED = None             # or an int like 1234 for reproducible shuffle
 # Option 1: Filter by a range of sentence IDs (inclusive).
 # IMPORTANT: keep only ONE of the `START_SENTENCE, END_SENTENCE = ...` lines uncommented.
 START_SENTENCE, END_SENTENCE = None, None
-# START_SENTENCE, END_SENTENCE = 1, 5
+# START_SENTENCE, END_SENTENCE = 1, 10
 #
 # Option 1b: Filter by an explicit (non-contiguous) set of IDs.
 # Examples: "1-11,23" or "5,7,9-12"

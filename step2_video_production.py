@@ -1043,9 +1043,18 @@ if __name__ == "__main__":
        
         
         if not BACKGROUND_DIR.exists() or not any(BACKGROUND_DIR.glob("*")):
-            BACKGROUND_DIR = get_asset_path(f"Backgrounds_Selected")
+            BACKGROUND_DIR = get_asset_path(f"Backgrounds_Selected/Default")
             backgrounds = [resize_background(p) for ext in ("*.png", "*.jpg", "*.jpeg")
                         for p in BACKGROUND_DIR.glob(ext)]
+        
+        # Ensure we have at least one background (use Default if all else fails)
+        if not backgrounds:
+            default_bg = get_asset_path(f"Backgrounds_Selected/Default")
+            backgrounds = [resize_background(p) for ext in ("*.png", "*.jpg", "*.jpeg")
+                        for p in default_bg.glob(ext)]
+        
+        if not backgrounds:
+            raise RuntimeError(f"❌ No backgrounds found in {BACKGROUND_DIR} or Default folder")
 
     with log_time("Assign Backgrounds"):
         tagged_sentences = assign_backgrounds(raw_sentences, backgrounds)
