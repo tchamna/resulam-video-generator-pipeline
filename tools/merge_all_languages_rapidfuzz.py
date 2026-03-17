@@ -68,6 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write the current merged CSV after each language merge.",
     )
+    parser.add_argument(
+        "--language-names",
+        help="Optional comma-separated subset of language names to merge.",
+    )
     return parser
 
 
@@ -112,6 +116,12 @@ def build_language_sheet(master_df: pd.DataFrame, master_language: str, language
     return sheet
 
 
+def normalize_export_text(value):
+    if pd.isna(value):
+        return value
+    return str(value).replace("’", "'").replace("`", "'")
+
+
 def export_language_workbook(
     master_df: pd.DataFrame,
     available_languages: list[str],
@@ -123,13 +133,40 @@ def export_language_workbook(
             if language_name not in master_df.columns:
                 continue
             sheet_df = build_language_sheet(master_df, master_language, language_name)
+            for column in ("Francais", "Anglais"):
+                if column in sheet_df.columns:
+                    sheet_df[column] = sheet_df[column].map(normalize_export_text)
             sheet_df.to_excel(writer, sheet_name=language_name[:31], index=False)
+
+
+def build_csv_export_frame(master_df: pd.DataFrame, available_languages: list[str]) -> pd.DataFrame:
+    csv_columns = ["GLOBAL_ID", "French", "English"] + [
+        language_name for language_name in available_languages if language_name in master_df.columns
+    ]
+    return master_df[csv_columns].copy()
+
+
+def get_available_languages(args: argparse.Namespace) -> list[str]:
+    requested = None
+    if args.language_names:
+        requested = [name.strip() for name in args.language_names.split(",") if name.strip()]
+    if args.excel:
+        xls = pd.ExcelFile(args.excel)
+        available = [name for name in sorted(LANGUAGE_PATHS.keys()) if name in xls.sheet_names]
+    else:
+        available = sorted(LANGUAGE_PATHS.keys())
+    if requested is None:
+        return available
+    requested_set = set(requested)
+    if args.master_language not in requested_set:
+        requested_set.add(args.master_language)
+    return [name for name in available if name in requested_set]
 
 
 def main() -> None:
     args = build_parser().parse_args()
 
-    available_languages = sorted(LANGUAGE_PATHS.keys())
+    available_languages = get_available_languages(args)
     if args.master_language not in available_languages:
         raise ValueError(f"Master language '{args.master_language}' is not in LANGUAGE_PATHS.")
 
@@ -137,7 +174,7 @@ def main() -> None:
     if not args.excel or args.master_language == "Nufi":
         processor = PhrasebookProcessor(base_path=args.base_path)
         print("Loading source phrasebooks once...")
-        processor.load_all_languages()
+        processor.load_all_languages(language_names=available_languages)
         print("Processing source phrasebooks once...")
         processor.process_all_languages()
 
@@ -179,12 +216,13 @@ def main() -> None:
         master_df.insert(0, "GLOBAL_ID", range(1, len(master_df) + 1))
     else:
         master_df.insert(0, "GLOBAL_ID", range(1, len(master_df) + 1))
-    output_path = Path(args.output)
-    master_df.to_csv(output_path, index=False, encoding="utf-8-sig")
-    print(f"Wrote merged output to {output_path}")
     workbook_path = Path(args.excel_output)
     export_language_workbook(master_df, available_languages, args.master_language, workbook_path)
     print(f"Wrote per-language workbook to {workbook_path}")
+    output_path = Path(args.output)
+    csv_df = build_csv_export_frame(master_df, available_languages)
+    csv_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"Wrote merged output to {output_path}")
 
 
 if __name__ == "__main__":

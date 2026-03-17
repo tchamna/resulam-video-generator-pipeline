@@ -24,7 +24,9 @@ License: See LICENSE file
 import os
 import re
 import shutil
+import subprocess
 import sys
+import json
 import tempfile
 import threading
 import time
@@ -108,6 +110,53 @@ SENTENCE_REPLACEMENTS = {
 
 # Combined replacements dictionary
 ALL_REPLACEMENTS = {**PUNCTUATION_REPLACEMENTS, **SENTENCE_REPLACEMENTS}
+
+
+def fix_nbsp(text: str, source_path: str = "") -> Tuple[str, List[Dict[str, str]]]:
+    """
+    Replace NBSP with a normal space only when it behaves like an in-text
+    word separator, not when it sits before punctuation.
+    """
+    if not text:
+        return text, []
+
+    report_entries: List[Dict[str, str]] = []
+    chars = list(text)
+    punctuation_chars = set(".,;:!?")
+    for idx, ch in enumerate(text):
+        if ch not in {"\u00A0", "\u202F"}:
+            continue
+        if idx == 0 or idx == len(text) - 1:
+            continue
+        prev_char = text[idx - 1]
+        next_char = text[idx + 1]
+        if prev_char.isspace() or next_char.isspace() or next_char in punctuation_chars:
+            continue
+
+        left_start = idx - 1
+        while left_start > 0 and not text[left_start - 1].isspace():
+            left_start -= 1
+        right_end = idx + 1
+        while right_end < len(text) and not text[right_end].isspace():
+            right_end += 1
+
+        left_word = text[left_start:idx]
+        right_word = text[idx + 1:right_end]
+        original_pair = text[left_start:right_end]
+        fixed_pair = f"{left_word} {right_word}"
+        report_entries.append(
+            {
+                "file_path": source_path,
+                "left_word": left_word,
+                "right_word": right_word,
+                "original_pair": original_pair,
+                "fixed_pair": fixed_pair,
+                "nbsp_type": "NNBSP" if ch == "\u202F" else "NBSP",
+            }
+        )
+        chars[idx] = " "
+
+    return "".join(chars), report_entries
 
 
 def normalize_merge_key_text(text: Any) -> str:
@@ -257,8 +306,6 @@ def normalize_merge_key_text(text: Any) -> str:
             break
 
     person_name_patterns = [
-        (r"^c'est [a-z0-9'-]+(?: [a-z0-9'-]+){0,2}$", "c'est x person"),
-        (r"^it is [a-z0-9'-]+(?: [a-z0-9'-]+){0,2}$", "it is x person"),
         (r"^je suis l'enfant de papa .+$", "i am papa x's child"),
         (r"^je suis l enfant de papa .+$", "i am papa x's child"),
         (r"^i am papa .+'s child$", "i am papa x's child"),
@@ -275,6 +322,57 @@ def normalize_merge_key_text(text: Any) -> str:
         if re.match(pattern, s):
             s = replacement
             break
+
+    # Only treat very short "c'est X" / "it is X" rows as person-name templates.
+    c_est_person_blacklist = {
+        "un", "une", "le", "la", "les", "mon", "ma", "mes", "ce", "cette",
+        "vrai", "grand", "grande", "tres", "trop", "mon ami", "mon amie",
+    }
+    c_est_person_first_token_blacklist = {
+        "un", "une", "le", "la", "les", "mon", "ma", "mes", "ce", "cette",
+        "vrai", "grand", "grande", "tres", "trop",
+    }
+    def _name_like_tokens(text: str, max_tokens: int = 2) -> bool:
+        tokens = text.split()
+        if not tokens or len(tokens) > max_tokens:
+            return False
+        for token in tokens:
+            if token.isdigit():
+                return False
+            if any(ch in token for ch in "/\\@#$%^&*_=+[]{}<>"):
+                return False
+        return True
+
+    if s.startswith("c'est "):
+        tail = s[len("c'est "):].strip()
+        first_token = tail.split()[0] if tail else ""
+        if (
+            tail and
+            tail not in c_est_person_blacklist and
+            first_token not in c_est_person_first_token_blacklist and
+            _name_like_tokens(tail)
+        ):
+            s = "c'est x person"
+    elif s.startswith("it is "):
+        tail = s[len("it is "):].strip()
+        generic_it_is_terms = {
+            "me", "midnight", "raining", "hailing", "snowing", "cloudy",
+            "stormy", "foggy", "difficult", "hard", "true", "funny",
+            "amusing", "good", "fine", "delicious", "succulent", "salty",
+            "cold", "obligatory", "compulsory", "mandatory", "nothing",
+            "okay", "ok", "awful", "horrible", "hideous", "unimaginable",
+            "incredible", "curious", "bizarre", "revolting", "scandalous",
+            "affreux", "amusant", "bon", "succulent",
+        }
+        tokens = tail.split()
+        if (
+            tail and
+            len(tokens) <= 2 and
+            tokens[0] not in {"a", "an", "the"} and
+            tail not in generic_it_is_terms and
+            _name_like_tokens(tail)
+        ):
+            s = "it is x person"
 
     # Generalize location examples that differ only by the concrete place.
     location_patterns = [
@@ -506,7 +604,10 @@ def clean_phrase(phrase: str, sep1: str = "|", sep2: str = "/") -> str:
     return clean_sentence
 
 
-def extract_text_from_docx(file_path: str) -> List[str]:
+def extract_text_from_docx(
+    file_path: str,
+    nbsp_fix_report: Optional[List[Dict[str, str]]] = None,
+) -> List[str]:
     """
     Extract phrasebook entries from a Word document.
 
@@ -525,8 +626,11 @@ def extract_text_from_docx(file_path: str) -> List[str]:
     # Extract text from document
     text_content = docx2txt.process(file_path)
 
-    # Clean up special characters
-    text_content = text_content.replace("\xa0", "")
+    # Clean up special characters. Preserve word boundaries from Word docs
+    # without disturbing spacing before punctuation.
+    text_content, fix_entries = fix_nbsp(text_content, source_path=file_path)
+    if nbsp_fix_report is not None and fix_entries:
+        nbsp_fix_report.extend(fix_entries)
     text_content = text_content.replace("\t", "")
 
     # Split into lines and filter for valid entries
@@ -596,13 +700,13 @@ def replace_text_in_word_documents_inplace(
         reverse=True,
     )
 
-    # Pre-compute which pairs are "dangerous" (old is a substring of new).
-    # Only these need corruption fix and Pass 0 protection.
-    dangerous_pairs = [
-        (idx, old, new)
-        for idx, (old, new) in enumerate(ordered_replacements)
-        if old != new and old in new
-    ]
+    def _compute_dangerous_pairs(active_replacements: List[Tuple[str, str]]) -> List[Tuple[int, str, str]]:
+        """Pairs where old is a substring of new need placeholder protection."""
+        return [
+            (idx, old, new)
+            for idx, (old, new) in enumerate(active_replacements)
+            if old != new and old in new
+        ]
 
     # Flush helper so every log line appears immediately in the terminal.
     def _log(msg: str) -> None:
@@ -642,10 +746,11 @@ def replace_text_in_word_documents_inplace(
             pass
         time.sleep(1)
 
-    def _process_one_doc(word_app, document_path, doc_name):
+    def _process_one_doc(word_app, document_path, doc_name, active_replacements):
         """Open, find/replace, close one document.  Returns (replaced_any, error_msg|None)."""
         doc = None
         replaced_any = False
+        dangerous_pairs = _compute_dangerous_pairs(active_replacements)
         try:
             _log(f"    [open] Opening {doc_name}…")
             doc = word_app.Documents.Open(
@@ -697,10 +802,10 @@ def replace_text_in_word_documents_inplace(
                             replaced_any = True
                             break
 
-            _log(f"    [3/4] Replacing ({len(ordered_replacements)} rules)…")
+            _log(f"    [3/4] Replacing ({len(active_replacements)} rules)…")
             ph_map = {
                 i: f"__PBR_{i}_{uuid.uuid4().hex[:6]}__"
-                for i in range(len(ordered_replacements))
+                for i in range(len(active_replacements))
             }
             used = set()
 
@@ -708,14 +813,14 @@ def replace_text_in_word_documents_inplace(
                 _do_replace_all(new_text, ph_map[idx])
                 used.add(idx)
 
-            for idx, (old_text, new_text) in enumerate(ordered_replacements):
+            for idx, (old_text, new_text) in enumerate(active_replacements):
                 if _do_replace_all(old_text, ph_map[idx]):
                     used.add(idx)
                     replaced_any = True
 
             _log(f"    [4/4] Restoring ({len(used)} placeholder(s))…")
             for idx in sorted(used):
-                _do_replace_all(ph_map[idx], ordered_replacements[idx][1])
+                _do_replace_all(ph_map[idx], active_replacements[idx][1])
 
             if replaced_any:
                 doc.Save()
@@ -763,9 +868,35 @@ def replace_text_in_word_documents_inplace(
                 results[document_path] = False
                 continue
 
+            # 1b. Pre-scan the doc text and keep only replacement pairs that
+            # actually occur in this document. This reduces Word Find/Replace
+            # work substantially while adding only one lightweight text pass.
+            try:
+                local_text = docx2txt.process(local_path) or ""
+                active_replacements = [
+                    (old_text, new_text)
+                    for old_text, new_text in ordered_replacements
+                    if old_text in local_text
+                ]
+                _log(
+                    f"    [scan] Applicable replacements: {len(active_replacements)}/{len(ordered_replacements)}"
+                )
+            except Exception as exc:
+                _log(f"    [scan] Pre-scan failed, falling back to full rule set: {exc}")
+                active_replacements = ordered_replacements
+
+            if not active_replacements:
+                _log(f"    – No matching replacement substrings found")
+                results[document_path] = False
+                try:
+                    os.remove(local_path)
+                except Exception:
+                    pass
+                continue
+
             # 2. Process the local copy
             try:
-                ok, err = _process_one_doc(word, local_path, doc_name)
+                ok, err = _process_one_doc(word, local_path, doc_name, active_replacements)
                 if err:
                     _log(f"    ✗ Error: {err}")
                     # COM errors leave Word in a bad state — restart it.
@@ -849,6 +980,22 @@ def apply_multi_replacements(text: str, replacements: Dict[str, str]) -> str:
     for old_str, new_str in replacements.items():
         text = text.replace(old_str, new_str)
     return text
+
+
+def load_json_mapping(path: Optional[str]) -> Dict[str, str]:
+    """Load a simple string-to-string mapping from JSON."""
+    if not path:
+        return {}
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Replacement file must contain a JSON object: {path}")
+    mapping: Dict[str, str] = {}
+    for key, value in data.items():
+        if key is None:
+            continue
+        mapping[str(key)] = "" if value is None else str(value)
+    return mapping
 
 
 def convert_to_dataframe(
@@ -974,6 +1121,7 @@ class PhrasebookProcessor:
         self.language_data = {}
         self.dataframes = {}
         self.language_names = []
+        self.nbsp_fix_report: List[Dict[str, str]] = []
         self.equivalence_map: Dict[str, str] = {}
         self._merged_cache: Optional[pd.DataFrame] = None
 
@@ -1029,20 +1177,147 @@ class PhrasebookProcessor:
 
         return mapping
 
-    def load_all_languages(self) -> None:
+    def load_all_languages(self, language_names: Optional[List[str]] = None) -> None:
         """Load all configured language files."""
-        items = sorted(LANGUAGE_PATHS.items())
+        self.nbsp_fix_report = []
+        if language_names:
+            items = [(name, LANGUAGE_PATHS[name]) for name in language_names if name in LANGUAGE_PATHS]
+        else:
+            items = sorted(LANGUAGE_PATHS.items())
         for lang_name, rel_path in tqdm(items, desc="Loading languages", unit="lang"):
             full_path = os.path.join(self.base_path, rel_path)
 
             try:
                 tqdm.write(f"  → Loading {lang_name}")
-                phrases = extract_text_from_docx(full_path)
+                phrases = extract_text_from_docx(full_path, self.nbsp_fix_report)
                 start_idx = find_starting_index(phrases)
                 self.language_data[lang_name] = phrases[start_idx:]
                 self.language_names.append(lang_name)
             except Exception as e:
                 tqdm.write(f"  ⚠ Failed to load {lang_name}: {e}")
+
+    def export_nbsp_fix_report(self, output_path: str = "nbsp_fix_report.csv") -> None:
+        """Export all NBSP normalizations applied during doc extraction."""
+        columns = ["file_path", "left_word", "right_word", "original_pair", "fixed_pair", "nbsp_type"]
+        if not self.nbsp_fix_report:
+            pd.DataFrame(columns=columns).to_csv(output_path, index=False, encoding="utf-8-sig")
+            print(f"Exported NBSP fix report to {output_path} (no fixes found)")
+            return
+
+        report_df = pd.DataFrame(self.nbsp_fix_report)[columns].drop_duplicates()
+        report_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+        print(f"Exported NBSP fix report to {output_path} ({len(report_df)} fixes)")
+
+    def export_nbsp_fix_report_workbook(self, output_path: str = "nbsp_fix_report.xlsx") -> None:
+        """Export NBSP fix report to one Excel workbook with one sheet per language."""
+        columns = ["language", "file_path", "left_word", "right_word", "original_pair", "fixed_pair", "nbsp_type"]
+        reverse_paths = {os.path.join(self.base_path, rel_path): lang for lang, rel_path in LANGUAGE_PATHS.items()}
+
+        if not self.nbsp_fix_report:
+            with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+                pd.DataFrame(columns=columns).to_excel(writer, sheet_name="All", index=False)
+            print(f"Exported NBSP fix workbook to {output_path} (no fixes found)")
+            return
+
+        report_df = pd.DataFrame(self.nbsp_fix_report).drop_duplicates().copy()
+        report_df["language"] = report_df["file_path"].map(reverse_paths).fillna("Unknown")
+        report_df = report_df[columns]
+
+        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+            report_df.to_excel(writer, sheet_name="All", index=False)
+            for language_name, group in report_df.groupby("language", sort=True):
+                group.to_excel(writer, sheet_name=str(language_name)[:31], index=False)
+
+        print(f"Exported NBSP fix workbook to {output_path} ({len(report_df)} fixes)")
+
+    def export_nbsp_fixed_doc_copy(
+        self,
+        language_name: str,
+        output_path: Optional[str] = None,
+        visible: bool = False,
+    ) -> Optional[str]:
+        """
+        Create a copy of a source `.docx` with only NBSP fixes applied.
+
+        The original source document is left untouched.
+        """
+        rel_path = LANGUAGE_PATHS.get(language_name)
+        if not rel_path:
+            raise ValueError(f"Unknown language '{language_name}'")
+
+        source_path = os.path.join(self.base_path, rel_path)
+        if not os.path.exists(source_path):
+            raise FileNotFoundError(f"File not found: {source_path}")
+
+        relevant_rows = [
+            row for row in self.nbsp_fix_report
+            if row.get("file_path") == source_path
+        ]
+        replacements = {
+            row["original_pair"]: row["fixed_pair"]
+            for row in relevant_rows
+            if row.get("original_pair") and row.get("fixed_pair") and row["original_pair"] != row["fixed_pair"]
+        }
+
+        if output_path is None:
+            source = Path(source_path)
+            output_path = str(source.with_name(f"{source.stem}_nbsp_fixed{source.suffix}"))
+
+        shutil.copy2(source_path, output_path)
+
+        if not replacements:
+            print(f"No NBSP fixes to apply for {language_name}; copied source doc to {output_path}")
+            return output_path
+
+        replace_text_in_word_documents_inplace(
+            document_paths=[output_path],
+            replacements=replacements,
+            visible=visible,
+        )
+        print(f"Created NBSP-fixed copy for {language_name}: {output_path}")
+        return output_path
+
+    def apply_nbsp_fixes_inplace(
+        self,
+        language_names: Optional[List[str]] = None,
+        visible: bool = False,
+    ) -> Dict[str, bool]:
+        """
+        Apply detected NBSP fixes directly to the source Word documents.
+        """
+        selected_languages = language_names or sorted(LANGUAGE_PATHS.keys())
+        selected_paths = {
+            os.path.join(self.base_path, LANGUAGE_PATHS[lang_name])
+            for lang_name in selected_languages
+            if lang_name in LANGUAGE_PATHS
+        }
+
+        results: Dict[str, bool] = {}
+        report_by_path: Dict[str, Dict[str, str]] = defaultdict(dict)
+        for row in self.nbsp_fix_report:
+            file_path = row.get("file_path", "")
+            if not file_path or file_path not in selected_paths:
+                continue
+            original_pair = row.get("original_pair", "")
+            fixed_pair = row.get("fixed_pair", "")
+            if not original_pair or not fixed_pair or original_pair == fixed_pair:
+                continue
+            report_by_path[file_path][original_pair] = fixed_pair
+
+        for file_path in sorted(selected_paths):
+            replacements = report_by_path.get(file_path, {})
+            if not replacements:
+                print(f"No NBSP fixes to apply for {file_path}")
+                results[file_path] = False
+                continue
+            doc_result = replace_text_in_word_documents_inplace(
+                document_paths=[file_path],
+                replacements=replacements,
+                visible=visible,
+            )
+            results.update(doc_result)
+
+        return results
 
     def replace_text_in_language_docs_inplace(
         self,
@@ -1084,8 +1359,9 @@ class PhrasebookProcessor:
             visible=visible,
         )
 
-    def process_all_languages(self) -> None:
+    def process_all_languages(self, replacements: Optional[Dict[str, str]] = None) -> None:
         """Process all loaded language data into DataFrames."""
+        active_replacements = replacements or ALL_REPLACEMENTS
         for lang_name in tqdm(self.language_names, desc="Processing languages", unit="lang"):
             tqdm.write(f"  → Processing {lang_name}")
 
@@ -1100,7 +1376,7 @@ class PhrasebookProcessor:
             df = expand_columns(df, lang_name)
 
             # Apply replacements
-            df = df.applymap(lambda x: apply_multi_replacements(str(x), ALL_REPLACEMENTS))
+            df = df.applymap(lambda x: apply_multi_replacements(str(x), active_replacements))
 
             # Ensure space before '(' when directly attached: akye(Maakye → akye (Maakye, toi.(Sers → toi. (Sers
             df = df.applymap(lambda x: re.sub(r'(?<=\S)\(', ' (', str(x)) if isinstance(x, str) else x)
@@ -1688,6 +1964,72 @@ def build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only export CSV outputs and skip document replacement, Excel export, and other quality-check outputs.",
     )
+    parser.add_argument(
+        "--test-nbsp-language",
+        help="Load only one language docx, export an NBSP fix report for it, and stop without in-place edits.",
+    )
+    parser.add_argument(
+        "--create-nbsp-fixed-doc-copy",
+        action="store_true",
+        help="When used with --test-nbsp-language, create a non-destructive .docx copy with only NBSP fixes applied.",
+    )
+    parser.add_argument(
+        "--nbsp-fixed-doc-output",
+        help="Optional output path for the NBSP-fixed .docx copy created with --create-nbsp-fixed-doc-copy.",
+    )
+    parser.add_argument(
+        "--apply-nbsp-fixes-inplace",
+        action="store_true",
+        help="Detect NBSP fixes from the source docs and apply them directly in place to the source Word documents.",
+    )
+    parser.add_argument(
+        "--run-rapidfuzz-merge",
+        action="store_true",
+        help="After the main phrasebook processing finishes, run the RapidFuzz all-language merge.",
+    )
+    parser.add_argument(
+        "--skip-rapidfuzz-merge",
+        action="store_true",
+        help="Do not run the RapidFuzz all-language merge. RapidFuzz is the default canonical merge.",
+    )
+    parser.add_argument(
+        "--legacy-merge-csv",
+        action="store_true",
+        help="Also export the older non-RapidFuzz merged CSV for diagnostics.",
+    )
+    parser.add_argument(
+        "--language-names",
+        help="Optional comma-separated subset of language names to load and process.",
+    )
+    parser.add_argument(
+        "--doc-replacements-json",
+        help="Optional JSON file with extra in-place Word replacement rules.",
+    )
+    parser.add_argument(
+        "--normalization-replacements-json",
+        help="Optional JSON file with extra processing-time normalization replacements.",
+    )
+    parser.add_argument(
+        "--rapidfuzz-master-language",
+        default="Nufi",
+        help="Master language for the RapidFuzz merge. Defaults to Nufi.",
+    )
+    parser.add_argument(
+        "--rapidfuzz-threshold",
+        type=float,
+        default=85.0,
+        help="RapidFuzz minimum similarity threshold.",
+    )
+    parser.add_argument(
+        "--rapidfuzz-output",
+        default="African_Languages_dataframes_merged.csv",
+        help="Output CSV path for the RapidFuzz merge.",
+    )
+    parser.add_argument(
+        "--rapidfuzz-excel-output",
+        default="African_Languages_dataframes_rapidfuzz_merged.xlsx",
+        help="Output Excel workbook path for the RapidFuzz merge.",
+    )
     return parser
 
 
@@ -1700,6 +2042,52 @@ def main(argv: Optional[List[str]] = None):
 
     # Initialize processor
     processor = PhrasebookProcessor(base_path=args.base_path)
+    selected_languages = None
+    if args.language_names:
+        selected_languages = [name.strip() for name in args.language_names.split(",") if name.strip()]
+
+    if args.test_nbsp_language:
+        language_name = args.test_nbsp_language
+        if language_name not in LANGUAGE_PATHS:
+            raise ValueError(
+                f"Unknown language '{language_name}'. Choose from: {', '.join(sorted(LANGUAGE_PATHS))}"
+            )
+
+        print(f"\nTesting NBSP fixes for {language_name} only...")
+        processor.nbsp_fix_report = []
+        full_path = os.path.join(processor.base_path, LANGUAGE_PATHS[language_name])
+        phrases = extract_text_from_docx(full_path, processor.nbsp_fix_report)
+        report_name = f"nbsp_fix_report_{language_name}.csv"
+        processor.export_nbsp_fix_report(report_name)
+        processor.export_nbsp_fix_report_workbook(f"nbsp_fix_report_{language_name}.xlsx")
+        if args.create_nbsp_fixed_doc_copy:
+            processor.export_nbsp_fixed_doc_copy(
+                language_name=language_name,
+                output_path=args.nbsp_fixed_doc_output,
+                visible=False,
+            )
+        print(f"Loaded {len(phrases)} phrases from {language_name}")
+        print(f"Wrote {report_name}")
+        print("\nNBSP test complete!")
+        return
+
+    if args.apply_nbsp_fixes_inplace:
+        extra_doc_replacements = load_json_mapping(args.doc_replacements_json)
+        if extra_doc_replacements:
+            print("\nApplying custom in-place replacements before NBSP fixes...")
+            replacement_results = processor.replace_text_in_language_docs_inplace(
+                replacements=extra_doc_replacements,
+                language_names=selected_languages,
+            )
+            print(replacement_results)
+        print("\nDetecting NBSP fixes across all source documents...")
+        processor.load_all_languages(language_names=selected_languages)
+        processor.export_nbsp_fix_report("nbsp_fix_report.csv")
+        processor.export_nbsp_fix_report_workbook("nbsp_fix_report.xlsx")
+        results = processor.apply_nbsp_fixes_inplace(language_names=selected_languages)
+        print(results)
+        print("\nNBSP in-place update complete!")
+        return
 
     # Dictionary Replacement
     dict_replace = {
@@ -1732,16 +2120,25 @@ def main(argv: Optional[List[str]] = None):
         "I got married with a Dustman/garbage man/garbage collector.": "I got married to a Dustman/garbage man/garbage collector.",
         "Whom with? With whom? (When it is the 2nd time the question has been asked)": "With whom? (When it is the 2nd time the question is being asked.)",
     }
+    extra_doc_replacements = load_json_mapping(args.doc_replacements_json)
+    if extra_doc_replacements:
+        dict_replace.update(extra_doc_replacements)
+
+    processing_replacements = dict(ALL_REPLACEMENTS)
+    extra_normalization_replacements = load_json_mapping(args.normalization_replacements_json)
+    if extra_normalization_replacements:
+        processing_replacements.update(extra_normalization_replacements)
 
     run_doc_replacements = not (args.skip_doc_replacements or args.csv_only)
     run_excel_export = not (args.skip_excel or args.csv_only)
-    run_merge_csv = not args.skip_merge_csv
+    run_rapidfuzz_merge = not args.skip_rapidfuzz_merge
+    run_merge_csv = args.legacy_merge_csv and not args.skip_merge_csv
     run_quality_checks = not (args.skip_quality_checks or args.csv_only)
 
     if run_doc_replacements:
         results = processor.replace_text_in_language_docs_inplace(
             replacements=dict_replace,
-            # language_names=["Basaa", "DualaDouala", "Ewondo"], # All Languages by default
+            language_names=selected_languages,
         )
         print(results)
     else:
@@ -1752,12 +2149,16 @@ def main(argv: Optional[List[str]] = None):
 
     # Load all language files
     print("\nLoading language files...")
-    processor.load_all_languages()
+    processor.load_all_languages(language_names=selected_languages)
     print(f"Loaded {len(processor.language_names)} languages")
 
     # Process all languages
     print("\nProcessing languages...")
-    processor.process_all_languages()
+    processor.process_all_languages(replacements=processing_replacements)
+
+    # Export NBSP normalization report regardless of quality-check flags.
+    processor.export_nbsp_fix_report("nbsp_fix_report.csv")
+    processor.export_nbsp_fix_report_workbook("nbsp_fix_report.xlsx")
 
     # Export results
     print("\nExporting results...")
@@ -1768,7 +2169,7 @@ def main(argv: Optional[List[str]] = None):
     if run_merge_csv:
         processor.export_merged_to_csv("African_Languages_dataframes_merged.csv")
     else:
-        print("Skipping merged CSV export")
+        print("Skipping legacy merged CSV export")
 
     # Quality checks
     if run_quality_checks:
@@ -1784,6 +2185,34 @@ def main(argv: Optional[List[str]] = None):
         processor.export_equivalence_suggestions(EQUIVALENCE_SUGGESTIONS_CSV)
     else:
         print("\nSkipping quality checks")
+
+    if run_rapidfuzz_merge:
+        print("\nRunning RapidFuzz all-language merge...")
+        rapidfuzz_script = Path(__file__).with_name("merge_all_languages_rapidfuzz.py")
+        rapidfuzz_cmd = [
+            sys.executable,
+            str(rapidfuzz_script),
+            "--excel",
+            "African_Languages_dataframes.xlsx",
+            "--base-path",
+            args.base_path,
+            "--master-language",
+            args.rapidfuzz_master_language,
+            "--text-column",
+            "both",
+            "--threshold",
+            str(args.rapidfuzz_threshold),
+            "--output",
+            args.rapidfuzz_output,
+            "--excel-output",
+            args.rapidfuzz_excel_output,
+            "--checkpoint-every-language",
+        ]
+        if selected_languages:
+            rapidfuzz_cmd.extend(["--language-names", ",".join(selected_languages)])
+        subprocess.run(rapidfuzz_cmd, check=True)
+    else:
+        print("\nSkipping RapidFuzz all-language merge")
 
     print("\nProcessing complete!")
 

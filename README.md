@@ -258,6 +258,142 @@ This script is a post-production tool that combines multiple individual videos i
 
 - `.../Results_Videos/<Mode>/<Language>_Chapters_Combined/normalized_output/`
 
+# Word Processing Project
+
+This repository also contains a separate word-processing project for the trilingual conversation books. It can be used independently from the audio/video generation pipeline.
+
+The project covers:
+- source Word document cleanup and in-place replacements
+- NBSP detection and correction
+- phrasebook extraction into structured data
+- cross-language alignment and RapidFuzz merge
+- local desktop and browser UIs for non-technical users
+
+For phrasebook alignment, it uses `Nufi` as the anchor language, then aligns the other languages with this order:
+
+1. Exact `French + English` match
+2. Normalized/template `French + English` match
+3. RapidFuzz on the remaining rows only
+
+The merge is correspondence-first, not a standard outer join:
+- the merged CSV keeps the same row count and order as the Nufi source
+- low-information placeholder rows such as `... / ...` are left unmatched instead of being force-filled
+- the generated Excel workbook has one sheet per language and stores the matched counterpart `Francais`, `Anglais`, and local-language text for that language
+
+## Word Processing Scripts
+
+- `tools/guidedeconversationphrasebook_processing.py`
+  - loads and processes the source phrasebook documents
+  - applies in-place replacements when requested
+  - exports the original per-language workbook and merge-ready CSV outputs
+  - now supports skip flags for faster reruns
+- `tools/merge_all_languages_rapidfuzz.py`
+  - merges all languages into one CSV and one Excel workbook
+- `tools/generic_docx_batch.py`
+  - processes arbitrary uploaded `.docx` files outside the phrasebook language set
+  - supports NBSP reports, fixed copies, and in-place replacement
+- `tools/phrasebook_webapp.py`
+  - local browser UI for the word-processing workflow
+- `tools/phrasebook_app.py`
+  - desktop Tkinter UI for the same workflow
+- `tools/test_rapidfuzz_merge.py`
+  - test script for pairwise language alignment
+
+## Word Processing Outputs
+
+- `African_Languages_dataframes.xlsx`
+  - original per-language workbook
+- `African_Languages_dataframes_rapidfuzz_merged.csv`
+  - merged all-language table, anchored on Nufi order
+- `African_Languages_dataframes_rapidfuzz_merged.xlsx`
+  - one sheet per language with columns:
+    - `GLOBAL_ID`
+    - `Francais`
+    - `Anglais`
+    - `<Language>`
+
+Notes:
+- the Excel export normalizes curly apostrophes like `’` to straight apostrophes `'` in `Francais` and `Anglais` to make Excel search more reliable
+- per-language Excel sheets use that language's matched counterpart `Francais/Anglais`, not the Nufi anchor text
+
+## How To Run
+
+Run the original phrasebook processor:
+
+```powershell
+.\.venv_311\Scripts\python.exe .\tools\guidedeconversationphrasebook_processing.py
+```
+
+Fast CSV-only rerun:
+
+```powershell
+.\.venv_311\Scripts\python.exe .\tools\guidedeconversationphrasebook_processing.py --csv-only
+```
+
+Run the full RapidFuzz all-language merge from the existing workbook:
+
+```powershell
+.\.venv_311\Scripts\python.exe .\tools\merge_all_languages_rapidfuzz.py `
+  --excel African_Languages_dataframes.xlsx `
+  --base-path "G:\My Drive\Mbú'ŋwɑ̀'nì" `
+  --master-language Nufi `
+  --text-column both `
+  --threshold 85 `
+  --output African_Languages_dataframes_rapidfuzz_merged.csv `
+  --excel-output African_Languages_dataframes_rapidfuzz_merged.xlsx `
+  --checkpoint-every-language
+```
+
+Test one pair of languages only:
+
+```powershell
+.\.venv_311\Scripts\python.exe .\tools\test_rapidfuzz_merge.py `
+  --excel African_Languages_dataframes.xlsx `
+  --master-language Nufi `
+  --new-language Basaa `
+  --text-column both `
+  --threshold 85 `
+  --output merged_dataset_rapidfuzz.csv
+```
+
+## Word Processing UIs
+
+For non-technical users, you can run a local browser UI instead of typing commands manually.
+
+Start the web app:
+
+```powershell
+.\.venv_311\Scripts\python.exe .\tools\phrasebook_webapp.py
+```
+
+Or on Windows, double-click:
+
+```text
+run_phrasebook_webapp.bat
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765
+```
+
+The web app provides buttons for:
+- `Run`
+  - in-place replacement only
+- `Run and merge`
+  - full processing workflow plus RapidFuzz merge
+- `Merge-only`
+  - rerun only the final merge from an existing workbook
+
+The page also shows live command output while a task is running.
+
+There is also a desktop app:
+
+```powershell
+.\.venv_311\Scripts\python.exe .\tools\phrasebook_app.py
+```
+
 This is the input folder for Step 5.
 
 # Step 5: Add background music
