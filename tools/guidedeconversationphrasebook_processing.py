@@ -30,10 +30,12 @@ import threading
 import time
 import unicodedata
 import uuid
+import argparse
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Mapping
 from functools import reduce
+from collections import defaultdict, deque
 
 import pandas as pd
 import numpy as np
@@ -134,16 +136,20 @@ def normalize_merge_key_text(text: Any) -> str:
     s = re.sub(r"\(\s+", "(", s)
     s = re.sub(r"\s+\)", ")", s)
     s = re.sub(r"\s*:\s*", ":", s)
+    s = re.sub(r"([.!?])\(", r"\1 (", s)
+    s = re.sub(r"(?<=[0-9A-Za-z])\(", " (", s)
     s = re.sub(r"\s+", " ", s).strip()
 
     # Ignore trailing parenthetical glosses/annotations which vary across
     # sources but should not split merge keys. This covers:
     # - "sentence (Litt. xxx)" == "sentence (Litt. yyy)"
     # - "sentence (Lit. xxx)" == "sentence (Lit. yyy)"
+    # - "sentence (xxx)." == "sentence (yyy)."
+    # - "sentence (xxx)!" == "sentence (yyy)!"
     # - "sentence (xxx)" == "sentence (yyy)"
     # Only trailing parenthetical groups are removed to avoid changing the
     # core meaning of sentences with inline parentheses.
-    s = re.sub(r"(?:\s*\([^)]*\)\s*)+$", "", s).strip()
+    s = re.sub(r"(?:\s*\([^)]*\)[.?!;:]*\s*)+$", "", s).strip()
 
     # Ignore trailing square-bracket annotations, e.g.:
     # "Ma belle-sœur est malade. [C'est l'époux qui parle]"
@@ -191,10 +197,138 @@ def normalize_merge_key_text(text: Any) -> str:
     s = re.sub(r"[.,;:!?]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
 
+    # Many books prepend a proverb/introduction before the actual chapter
+    # learning objective. Keep the objective itself for merge alignment.
+    if "a la fin de ce chapitre" in s:
+        s = re.sub(r"^.*?(a la fin de ce chapitre\b)", r"\1", s).strip()
+    if ("by the end of this chapter" in s) or ("at the end of this chapter" in s):
+        s = re.sub(r"^.*?\b((?:by|at) the end of this chapter\b)", r"\1", s).strip()
+
+    # Generalize example/template rows that differ only by sample names.
+    # The source books often use different concrete names for the same
+    # conversational slot; merge keys should align those examples.
+    if re.match(r"^je m'appelle .+$", s) or re.match(r"^mon .*loge.*\s*est .+$", s):
+        s = "self name example"
+    elif re.match(r"^my (?:honorific )?name is .+$", s):
+        s = "self name example"
+
+    relationship_name_patterns = [
+        (r"^mon ami s'appelle .+$", "friend name example"),
+        (r"^ami s'appelle .+$", "friend name example"),
+        (r"^my friend's name is .+$", "friend name example"),
+        (r"^c'est mon ami(?: e)?$", "he or she is my friend"),
+        (r"^il/elle est mon ami(?: e)?$", "he or she is my friend"),
+        (r"^he/she is my friend$", "he or she is my friend"),
+        (r"^it's my friend$", "he or she is my friend"),
+        (r"^il s'appelle .+$", "his name example"),
+        (r"^his name is .+$", "his name example"),
+        (r"^elle s'appelle .+$", "her name example"),
+        (r"^her name is .+$", "her name example"),
+        (r"^ils s'appellent .+$", "their names example"),
+        (r"^elles s'appellent .+$", "their names example"),
+        (r"^their name(?:s)? are .+$", "their names example"),
+        (r"^mon fr.* s'appelle .+$", "my brother's name example"),
+        (r"^fr.* s'appelle .+$", "my brother's name example"),
+        (r"^my brother's name is .+$", "my brother's name example"),
+        (r"^ma s.*ur s'appelle .+$", "my sister's name example"),
+        (r"^s.*ur s'appelle .+$", "my sister's name example"),
+        (r"^my sister's name is .+$", "my sister's name example"),
+        (r"^mon p.*re s'appelle .+$", "my father's name example"),
+        (r"^p.*re s'appelle .+$", "my father's name example"),
+        (r"^my father's name is .+$", "my father's name example"),
+        (r"^ma m.*re s'appelle .+$", "my mother's name example"),
+        (r"^m.*re s'appelle .+$", "my mother's name example"),
+        (r"^my mother's name is .+$", "my mother's name example"),
+        (r"^mon mari s'appelle .+$", "my husband's name example"),
+        (r"^mari s'appelle .+$", "my husband's name example"),
+        (r"^my husband's name is .+$", "my husband's name example"),
+        (r"^ma femme s'appelle .+$", "my wife's name example"),
+        (r"^femme s'appelle .+$", "my wife's name example"),
+        (r"^my wife's name is .+$", "my wife's name example"),
+        (r"^mon enseignant s'appelle .+$", "my teacher's name example"),
+        (r"^enseignant s'appelle .+$", "my teacher's name example"),
+        (r"^my teacher is called .+$", "my teacher's name example"),
+        (r"^mon professeur s'appelle .+$", "my teacher's name example"),
+        (r"^professeur s'appelle .+$", "my teacher's name example"),
+    ]
+    for pattern, replacement in relationship_name_patterns:
+        if re.match(pattern, s):
+            s = replacement
+            break
+
+    person_name_patterns = [
+        (r"^c'est [a-z0-9'-]+(?: [a-z0-9'-]+){0,2}$", "c'est x person"),
+        (r"^it is [a-z0-9'-]+(?: [a-z0-9'-]+){0,2}$", "it is x person"),
+        (r"^je suis l'enfant de papa .+$", "i am papa x's child"),
+        (r"^je suis l enfant de papa .+$", "i am papa x's child"),
+        (r"^i am papa .+'s child$", "i am papa x's child"),
+        (r"^i am the child of daddy .+$", "i am papa x's child"),
+        (r"^i am the child of papa .+$", "i am papa x's child"),
+        (r"^i am the son of daddy .+$", "i am papa x's child"),
+        (r"^i am the daughter of daddy .+$", "i am papa x's child"),
+        (r"^notre village est .+$", "our village is x"),
+        (r"^our village is .+$", "our village is x"),
+        (r"^cher m .+$", "cher m x"),
+        (r"^dear mr .+$", "dear mr x"),
+    ]
+    for pattern, replacement in person_name_patterns:
+        if re.match(pattern, s):
+            s = replacement
+            break
+
+    # Generalize location examples that differ only by the concrete place.
+    location_patterns = [
+        (r"^j'habite .+$", "i live in x place"),
+        (r"^j'habite (?:a|au|aux|en) .+$", "i live in x place"),
+        (r"^i live in .+$", "i live in x place"),
+        (r"^i am from .+$", "i am from x place"),
+    ]
+    for pattern, replacement in location_patterns:
+        if re.match(pattern, s):
+            s = replacement
+            break
+    if re.match(r"^je suis de\s+[a-z0-9' \-]+$", s) and not re.match(r"^je suis de (?:bonne|mauvaise) humeur$", s):
+        s = "i am from x place"
+
+    # Generalize language-name examples that differ only by the concrete
+    # language being mentioned.
+    language_patterns = [
+        (r"^je sais parler le\s+.+\s+un tout petit peu$", "i can speak x language a little"),
+        (r"^je sais parler la\s+.+\s+un tout petit peu$", "i can speak x language a little"),
+        (r"^je sais parler l\s+.+\s+un tout petit peu$", "i can speak x language a little"),
+        (r"^je peux parler le\s+.+\s+un tout petit peu$", "i can speak x language a little"),
+        (r"^i can speak\s+.+\s+a little$", "i can speak x language a little"),
+        (r"^i can speak\s+.+\s+a little bit$", "i can speak x language a little"),
+        (r"^i speak\s+.+\s+a little$", "i can speak x language a little"),
+        (r"^i speak\s+.+\s+a little bit$", "i can speak x language a little"),
+        (r"^i know how to speak\s+.+\s+a little$", "i can speak x language a little"),
+        (r"^i know how to speak\s+.+\s+a little bit$", "i can speak x language a little"),
+    ]
+    for pattern, replacement in language_patterns:
+        if re.match(pattern, s):
+            s = replacement
+            break
+
+    # Generalize sentences that differ only by a named item/food/person.
+    named_item_patterns = [
+        (r"^j'aime le .+$", "j'aime le x"),
+        (r"^j'aime la .+$", "j'aime la x"),
+        (r"^i like .+$", "i like x"),
+        (r"^je ne parle pas bien .+$", "je ne parle pas bien x"),
+        (r"^i do not speak .+ well$", "i do not speak x well"),
+        (r"^i don't speak .+ well$", "i do not speak x well"),
+    ]
+    for pattern, replacement in named_item_patterns:
+        if re.match(pattern, s):
+            s = replacement
+            break
+
     # Curated equivalence rules for frequent near-identical variants.
     s = s.replace("en bonne santé", "en santé")
+    s = s.replace("je ne sais pas moi", "je ne sais pas")
     s = s.replace("do not suffer from anything", "do not suffer anything")
     s = s.replace("best regards (at the end of a letter)", "best wishes (at the end of a letter)")
+    s = s.replace("best regards", "best wishes")
     s = s.replace("veux tu faire les selles veux tu aller a la selle veux tu chier", "veux tu faire les selles veux tu aller a la selle veux tu faire caca")
     s = s.replace("do you want to go to the bathroom do you want to shit/excrete", "do you want to go to the bathroom do you want to excrete")
     s = s.replace("si c'est vrai je t'acheterai a boire sinon je te frapperai", "si c'est vrai je t'acheterais a boire sinon je te frapperais")
@@ -220,7 +354,23 @@ def normalize_merge_key_text(text: Any) -> str:
         "you are better",
         "yours is better",
     )
-
+    s = re.sub(r"^what are your friends'? name$", "what are your friends names", s)
+    s = re.sub(r"^what are your friends'? names$", "what are your friends names", s)
+    s = re.sub(r"^what is your friends'? name$", "what are your friends names", s)
+    s = s.replace("i'm going to greet him", "i am going to greet him")
+    s = s.replace("i am going greet him", "i am going to greet him")
+    s = s.replace("i am going greet", "i am going to greet him")
+    s = s.replace("welcome to many people", "welcome")
+    s = s.replace("soyez les bienvenus", "bienvenue")
+    s = s.replace("soyez le bienvenu", "bienvenue")
+    s = s.replace(
+        "fine good morning my husband",
+        "good morning my husband",
+    )
+    s = s.replace(
+        "c'est grand dommage pour moi litt c'est une grande perte pour moi",
+        "c'est grand dommage pour moi",
+    )
     # Generalize chapter-outcome language mentions:
     # "À la fin de ce chapitre ... en langue hausa" -> "... en langue x"
     # "By the end of this chapter ... in the hausa language" -> "... in the x language"
@@ -282,6 +432,10 @@ def _canonical_merge_pair(
 
 def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
+
+
+def _raw_pair_key(fr: Any, en: Any) -> Tuple[str, str]:
+    return (str(fr).strip(), str(en).strip())
 
 
 # =============================================================================
@@ -964,9 +1118,186 @@ class PhrasebookProcessor:
         """Clear the cached merged DataFrame so the next call recomputes it."""
         self._merged_cache = None
 
+    def _prepare_merge_rows(self) -> Dict[str, pd.DataFrame]:
+        """Prepare per-language rows with both raw and normalized merge keys."""
+        self.equivalence_map = self.load_equivalence_map(EQUIVALENCE_MAP_CSV)
+        prepared: Dict[str, pd.DataFrame] = {}
+
+        for lang_name in tqdm(self.language_names, desc="Preparing merge keys", unit="lang"):
+            subset = self.dataframes[lang_name][[lang_name, "Francais", "Anglais", "LOCAL_ID"]].copy()
+            subset["Francais"] = subset["Francais"].astype(str).str.strip()
+            subset["Anglais"] = subset["Anglais"].astype(str).str.strip()
+            subset["_raw_fr"] = subset["Francais"]
+            subset["_raw_en"] = subset["Anglais"]
+            canonical_pairs = subset.apply(
+                lambda r: _canonical_merge_pair(
+                    r["Francais"],
+                    r["Anglais"],
+                    self.equivalence_map,
+                ),
+                axis=1,
+            )
+            subset["_merge_fr"] = canonical_pairs.map(lambda x: x[0])
+            subset["_merge_en"] = canonical_pairs.map(lambda x: x[1])
+            subset = subset[
+                (subset["_merge_fr"].str.len() > 0) &
+                (subset["_merge_en"].str.len() > 0)
+            ].copy()
+            subset = subset.reset_index(drop=True)
+            subset["_row_id"] = subset.index.astype(int)
+            prepared[lang_name] = subset
+
+        return prepared
+
+    def _build_candidate_queues(
+        self,
+        df: pd.DataFrame,
+    ) -> Tuple[Dict[Tuple[str, str], deque], Dict[Tuple[str, str], deque]]:
+        """Build exact and normalized lookup queues preserving source order."""
+        exact_map: Dict[Tuple[str, str], deque] = defaultdict(deque)
+        normalized_map: Dict[Tuple[str, str], deque] = defaultdict(deque)
+
+        ordered = df.sort_values("LOCAL_ID", kind="mergesort")
+        for row_id, raw_fr, raw_en, merge_fr, merge_en in zip(
+            ordered["_row_id"],
+            ordered["_raw_fr"],
+            ordered["_raw_en"],
+            ordered["_merge_fr"],
+            ordered["_merge_en"],
+        ):
+            exact_map[_raw_pair_key(raw_fr, raw_en)].append(int(row_id))
+            normalized_map[(merge_fr, merge_en)].append(int(row_id))
+
+        return exact_map, normalized_map
+
+    def _build_anchor_buckets(
+        self,
+        anchor_df: pd.DataFrame,
+    ) -> List[Dict[str, Any]]:
+        """
+        Group anchor rows by normalized key while preserving first occurrence order.
+
+        Repeated Nufi rows often represent the same template slot with different
+        sample names/places. These should form one correspondence bucket.
+        """
+        buckets: List[Dict[str, Any]] = []
+        grouped = anchor_df.sort_values("LOCAL_ID", kind="mergesort").groupby(
+            ["_merge_fr", "_merge_en"],
+            sort=False,
+            dropna=False,
+        )
+        for (merge_fr, merge_en), group in grouped:
+            ordered = group.sort_values("LOCAL_ID", kind="mergesort")
+            first = ordered.iloc[0]
+            buckets.append({
+                "_merge_fr": merge_fr,
+                "_merge_en": merge_en,
+                "_merge_order": first["LOCAL_ID"],
+                "Francais": first["_raw_fr"],
+                "Anglais": first["_raw_en"],
+                "anchor_rows": ordered.to_dict("records"),
+            })
+        return buckets
+
+    @staticmethod
+    def _pop_next_available(queue: deque, used_ids: set) -> Optional[int]:
+        """Pop the next unused row id from a queue."""
+        while queue:
+            row_id = queue.popleft()
+            if row_id not in used_ids:
+                return row_id
+        return None
+
+    def _merge_remaining_rows(
+        self,
+        remaining_by_language: Dict[str, pd.DataFrame],
+    ) -> List[Dict[str, Any]]:
+        """
+        Merge rows that could not be aligned to the anchor language.
+
+        Stage 1 groups by exact FR/EN pair. Stage 2 groups the leftover rows
+        by normalized FR/EN pair. Duplicates are preserved via occurrence order.
+        """
+        merged_rows: List[Dict[str, Any]] = []
+
+        def build_rows(group_attr: str, source_rows: Dict[str, pd.DataFrame]) -> List[Dict[str, Any]]:
+            grouped: Dict[Any, Dict[str, List[Dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
+            for lang_name, df in source_rows.items():
+                if df.empty:
+                    continue
+                ordered = df.sort_values("LOCAL_ID", kind="mergesort")
+                for row in ordered.to_dict("records"):
+                    grouped[row[group_attr]][lang_name].append(row)
+
+            rows: List[Dict[str, Any]] = []
+            for _, lang_groups in grouped.items():
+                occurrences = max(len(items) for items in lang_groups.values())
+                for idx in range(occurrences):
+                    row_data: Dict[str, Any] = {lang: np.nan for lang in self.language_names}
+                    fr_value = None
+                    en_value = None
+                    merge_order = np.nan
+                    for lang_name in self.language_names:
+                        items = lang_groups.get(lang_name, [])
+                        if idx >= len(items):
+                            continue
+                        item = items[idx]
+                        row_data[lang_name] = item[lang_name]
+                        if fr_value is None:
+                            fr_value = item["_raw_fr"]
+                        if en_value is None:
+                            en_value = item["_raw_en"]
+                        if pd.isna(merge_order):
+                            merge_order = item["LOCAL_ID"]
+                    row_data["Francais"] = fr_value
+                    row_data["Anglais"] = en_value
+                    row_data["_merge_order"] = merge_order
+                    rows.append(row_data)
+            return rows
+
+        exact_rows = build_rows("_exact_key", remaining_by_language)
+        if exact_rows:
+            merged_rows.extend(exact_rows)
+
+        consumed_ids: Dict[str, set] = {lang: set() for lang in remaining_by_language}
+        for row in exact_rows:
+            for lang_name in self.language_names:
+                if lang_name not in remaining_by_language:
+                    continue
+                value = row.get(lang_name)
+                if pd.isna(value):
+                    continue
+                matches = remaining_by_language[lang_name][remaining_by_language[lang_name][lang_name] == value]
+                for row_id in matches["_row_id"].tolist():
+                    if row_id not in consumed_ids[lang_name]:
+                        consumed_ids[lang_name].add(int(row_id))
+                        break
+
+        normalized_remaining: Dict[str, pd.DataFrame] = {}
+        for lang_name, df in remaining_by_language.items():
+            if not consumed_ids[lang_name]:
+                normalized_remaining[lang_name] = df.copy()
+            else:
+                normalized_remaining[lang_name] = df[~df["_row_id"].isin(consumed_ids[lang_name])].copy()
+            normalized_remaining[lang_name]["_norm_key"] = list(
+                zip(normalized_remaining[lang_name]["_merge_fr"], normalized_remaining[lang_name]["_merge_en"])
+            )
+
+        merged_rows.extend(build_rows("_norm_key", normalized_remaining))
+        return merged_rows
+
     def merge_all_dataframes(self) -> pd.DataFrame:
         """
-        Merge all language DataFrames on French and English columns.
+        Build correspondence rows anchored on Nufi when available.
+
+        For each Nufi row, try to find the corresponding row in every other
+        language by:
+        1. exact FR/EN text match
+        2. normalized FR/EN match
+
+        Remaining unmatched rows are then grouped in two passes:
+        1. exact FR/EN pair
+        2. normalized FR/EN pair
 
         Results are cached; call invalidate_merge_cache() to force recomputation.
 
@@ -976,78 +1307,97 @@ class PhrasebookProcessor:
         if self._merged_cache is not None:
             return self._merged_cache
 
-        merge_columns = ["_merge_fr", "_merge_en"]
-        self.equivalence_map = self.load_equivalence_map(EQUIVALENCE_MAP_CSV)
-        dataframes_to_merge = []
-        fr_cols = []
-        en_cols = []
-        order_cols = []
-
-        for lang_name in tqdm(self.language_names, desc="Preparing merge keys", unit="lang"):
-            subset = self.dataframes[lang_name][[lang_name, "Francais", "Anglais", "LOCAL_ID"]].copy()
-            subset["Francais"] = subset["Francais"].astype(str).str.strip()
-            subset["Anglais"] = subset["Anglais"].astype(str).str.strip()
-            canonical_pairs = subset.apply(
-                lambda r: _canonical_merge_pair(
-                    r["Francais"],
-                    r["Anglais"],
-                    self.equivalence_map,
-                ),
-                axis=1
-            )
-            subset["_merge_fr"] = canonical_pairs.map(lambda x: x[0])
-            subset["_merge_en"] = canonical_pairs.map(lambda x: x[1])
-
-            # Drop empty merge keys and collapse duplicate normalized keys per language.
-            subset = subset[
-                (subset["_merge_fr"].str.len() > 0) &
-                (subset["_merge_en"].str.len() > 0)
-            ]
-            # If a language has duplicate normalized keys, keep the first occurrence
-            # to preserve original file ordering.
-            subset = subset.sort_values("LOCAL_ID").drop_duplicates(subset=merge_columns, keep="first")
-
-            fr_col = f"_fr_{lang_name}"
-            en_col = f"_en_{lang_name}"
-            ord_col = f"_ord_{lang_name}"
-            subset = subset.rename(columns={"Francais": fr_col, "Anglais": en_col})
-            subset = subset.rename(columns={"LOCAL_ID": ord_col})
-            dataframes_to_merge.append(subset[[lang_name, fr_col, en_col, ord_col] + merge_columns])
-            fr_cols.append(fr_col)
-            en_cols.append(en_col)
-            order_cols.append(ord_col)
-
-        if not dataframes_to_merge:
+        prepared = self._prepare_merge_rows()
+        if not prepared:
             return pd.DataFrame()
 
-        # Perform iterative outer merge on normalized key columns.
-        merged_df = dataframes_to_merge[0]
-        for df in tqdm(dataframes_to_merge[1:], desc="Merging dataframes", unit="lang"):
-            merged_df = pd.merge(
-                merged_df,
-                df,
-                on=merge_columns,
-                how="outer"
-            )
+        anchor_lang = "Nufi" if "Nufi" in prepared else next(iter(prepared))
+        anchor_df = prepared[anchor_lang].sort_values("LOCAL_ID", kind="mergesort").copy()
+        anchor_buckets = self._build_anchor_buckets(anchor_df)
+        matched_ids: Dict[str, set] = {lang: set() for lang in prepared}
+        merged_rows: List[Dict[str, Any]] = []
 
-        # Rebuild user-facing French/English from first available source column.
-        merged_df["Francais"] = merged_df[fr_cols].bfill(axis=1).iloc[:, 0]
-        merged_df["Anglais"] = merged_df[en_cols].bfill(axis=1).iloc[:, 0]
+        candidate_maps: Dict[str, Tuple[Dict[Tuple[str, str], deque], Dict[Tuple[str, str], deque]]] = {}
+        for lang_name, df in prepared.items():
+            if lang_name == anchor_lang:
+                continue
+            candidate_maps[lang_name] = self._build_candidate_queues(df)
 
-        # Stable merged ordering:
-        # - primary: first available LOCAL_ID across languages (in load order)
-        # - fallback: normalized key
-        merged_df["_merge_order"] = merged_df[order_cols].bfill(axis=1).iloc[:, 0]
-        merged_df = merged_df.drop_duplicates(subset=merge_columns, keep="first")
-        merged_df = merged_df.sort_values(
-            by=["_merge_order", "_merge_fr", "_merge_en"],
-            kind="mergesort",
-            na_position="last"
-        ).reset_index(drop=True)
-        merged_df["GLOBAL_ID"] = np.arange(1, len(merged_df) + 1, dtype=int)
+        for bucket in tqdm(anchor_buckets, total=len(anchor_buckets), desc="Matching anchor buckets", unit="bucket"):
+            row_data: Dict[str, Any] = {lang: np.nan for lang in self.language_names}
+            first_anchor = bucket["anchor_rows"][0]
+            row_data[anchor_lang] = first_anchor[anchor_lang]
+            row_data["Francais"] = bucket["Francais"]
+            row_data["Anglais"] = bucket["Anglais"]
+            row_data["_merge_order"] = bucket["_merge_order"]
+            for anchor_row in bucket["anchor_rows"]:
+                matched_ids[anchor_lang].add(int(anchor_row["_row_id"]))
 
-        language_cols = [lang for lang in self.language_names if lang in merged_df.columns]
-        merged_df = merged_df[["GLOBAL_ID", "Francais", "Anglais"] + language_cols]
+            exact_keys = [
+                _raw_pair_key(anchor_row["_raw_fr"], anchor_row["_raw_en"])
+                for anchor_row in bucket["anchor_rows"]
+            ]
+            normalized_key = (bucket["_merge_fr"], bucket["_merge_en"])
+
+            for lang_name in self.language_names:
+                if lang_name == anchor_lang or lang_name not in prepared:
+                    continue
+                exact_map, normalized_map = candidate_maps[lang_name]
+                matched_row_id = None
+                for exact_key in exact_keys:
+                    matched_row_id = self._pop_next_available(exact_map[exact_key], matched_ids[lang_name])
+                    if matched_row_id is not None:
+                        break
+                if matched_row_id is None:
+                    matched_row_id = self._pop_next_available(normalized_map[normalized_key], matched_ids[lang_name])
+                if matched_row_id is None:
+                    continue
+
+                matched_ids[lang_name].add(matched_row_id)
+                matched_row = prepared[lang_name].loc[prepared[lang_name]["_row_id"] == matched_row_id].iloc[0]
+                row_data[lang_name] = matched_row[lang_name]
+
+                # For template-style buckets, consume remaining rows with the
+                # same normalized key in that language so they do not reappear
+                # as unrelated leftover rows.
+                bucket_is_template = (
+                    bucket["_merge_fr"].endswith("example") or
+                    bucket["_merge_en"].endswith("example") or
+                    bucket["_merge_fr"] in {"i live in x place", "i am from x place", "he or she is my friend"} or
+                    bucket["_merge_en"] in {"i live in x place", "i am from x place", "he or she is my friend"}
+                )
+                if bucket_is_template:
+                    same_key_rows = prepared[lang_name][
+                        (prepared[lang_name]["_merge_fr"] == normalized_key[0]) &
+                        (prepared[lang_name]["_merge_en"] == normalized_key[1])
+                    ]
+                    matched_ids[lang_name].update(int(row_id) for row_id in same_key_rows["_row_id"].tolist())
+
+            merged_rows.append(row_data)
+
+        remaining_by_language: Dict[str, pd.DataFrame] = {}
+        for lang_name, df in prepared.items():
+            remaining = df[~df["_row_id"].isin(matched_ids[lang_name])].copy()
+            if remaining.empty:
+                continue
+            remaining["_exact_key"] = list(zip(remaining["_raw_fr"], remaining["_raw_en"]))
+            remaining_by_language[lang_name] = remaining
+
+        if remaining_by_language:
+            merged_rows.extend(self._merge_remaining_rows(remaining_by_language))
+
+        merged_df = pd.DataFrame(merged_rows)
+        if merged_df.empty:
+            merged_df = pd.DataFrame(columns=["GLOBAL_ID", "Francais", "Anglais"] + self.language_names)
+        else:
+            merged_df = merged_df.sort_values(
+                by=["_merge_order", "Francais", "Anglais"],
+                kind="mergesort",
+                na_position="last",
+            ).reset_index(drop=True)
+            merged_df["GLOBAL_ID"] = np.arange(1, len(merged_df) + 1, dtype=int)
+            merged_df = merged_df[["GLOBAL_ID", "Francais", "Anglais"] + self.language_names]
+
         self._merged_cache = merged_df
         return merged_df
 
@@ -1305,13 +1655,51 @@ class PhrasebookProcessor:
 # =============================================================================
 
 
-def main():
+def build_cli_parser() -> argparse.ArgumentParser:
+    """Create CLI parser for running selected pipeline stages."""
+    parser = argparse.ArgumentParser(description="African Language Phrasebook Processor")
+    parser.add_argument(
+        "--base-path",
+        default=DEFAULT_BASE_PATH,
+        help="Base folder containing the source language documents.",
+    )
+    parser.add_argument(
+        "--skip-doc-replacements",
+        action="store_true",
+        help="Skip in-place Word document replacements before loading data.",
+    )
+    parser.add_argument(
+        "--skip-excel",
+        action="store_true",
+        help="Skip Excel export.",
+    )
+    parser.add_argument(
+        "--skip-quality-checks",
+        action="store_true",
+        help="Skip lowercase issues, proper-name detection, merge diagnostics, and equivalence suggestions.",
+    )
+    parser.add_argument(
+        "--skip-merge-csv",
+        action="store_true",
+        help="Skip merged CSV export.",
+    )
+    parser.add_argument(
+        "--csv-only",
+        action="store_true",
+        help="Only export CSV outputs and skip document replacement, Excel export, and other quality-check outputs.",
+    )
+    return parser
+
+
+def main(argv: Optional[List[str]] = None):
     """Main execution function."""
+    args = build_cli_parser().parse_args(argv)
+
     print("African Language Phrasebook Processor")
     print("=" * 50)
 
     # Initialize processor
-    processor = PhrasebookProcessor()
+    processor = PhrasebookProcessor(base_path=args.base_path)
 
     # Dictionary Replacement
     dict_replace = {
@@ -1345,14 +1733,19 @@ def main():
         "Whom with? With whom? (When it is the 2nd time the question has been asked)": "With whom? (When it is the 2nd time the question is being asked.)",
     }
 
-    results = processor.replace_text_in_language_docs_inplace(
-    replacements=dict_replace,
-    # language_names=["Basaa", "DualaDouala", "Ewondo"], # All Languages by default
-)
+    run_doc_replacements = not (args.skip_doc_replacements or args.csv_only)
+    run_excel_export = not (args.skip_excel or args.csv_only)
+    run_merge_csv = not args.skip_merge_csv
+    run_quality_checks = not (args.skip_quality_checks or args.csv_only)
 
-
-
-    print(results)
+    if run_doc_replacements:
+        results = processor.replace_text_in_language_docs_inplace(
+            replacements=dict_replace,
+            # language_names=["Basaa", "DualaDouala", "Ewondo"], # All Languages by default
+        )
+        print(results)
+    else:
+        print("Skipping in-place document replacements")
 
 
     processor.ensure_equivalence_map_template(EQUIVALENCE_MAP_CSV)
@@ -1368,20 +1761,29 @@ def main():
 
     # Export results
     print("\nExporting results...")
-    processor.export_to_excel("African_Languages_dataframes.xlsx")
-    processor.export_merged_to_csv("African_Languages_dataframes_merged.csv")
+    if run_excel_export:
+        processor.export_to_excel("African_Languages_dataframes.xlsx")
+    else:
+        print("Skipping Excel export")
+    if run_merge_csv:
+        processor.export_merged_to_csv("African_Languages_dataframes_merged.csv")
+    else:
+        print("Skipping merged CSV export")
 
     # Quality checks
-    print("\nRunning quality checks...")
-    processor.find_lowercase_issues("not_starting_with_capital.xlsx")
+    if run_quality_checks:
+        print("\nRunning quality checks...")
+        processor.find_lowercase_issues("not_starting_with_capital.xlsx")
 
-    proper_names, missing = processor.identify_proper_names()
-    if not proper_names.empty:
-        proper_names.to_csv("data_ProperNames.csv", encoding="utf-8-sig", index=False)
-        print(f"Found {len(proper_names)} entries with proper names")
+        proper_names, missing = processor.identify_proper_names()
+        if not proper_names.empty:
+            proper_names.to_csv("data_ProperNames.csv", encoding="utf-8-sig", index=False)
+            print(f"Found {len(proper_names)} entries with proper names")
 
-    processor.export_merge_diagnostics("merge_problematic_lines.csv")
-    processor.export_equivalence_suggestions(EQUIVALENCE_SUGGESTIONS_CSV)
+        processor.export_merge_diagnostics("merge_problematic_lines.csv")
+        processor.export_equivalence_suggestions(EQUIVALENCE_SUGGESTIONS_CSV)
+    else:
+        print("\nSkipping quality checks")
 
     print("\nProcessing complete!")
 
