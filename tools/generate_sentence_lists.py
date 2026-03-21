@@ -25,6 +25,8 @@ import sys
 
 import pandas as pd
 
+SKIP_SHEETS = {"All", "Exceptions", "Sheet1", "Sheet2"}
+
 
 def find_column(columns, patterns):
     for pat in patterns:
@@ -36,7 +38,10 @@ def find_column(columns, patterns):
 
 def detect_columns(df: pd.DataFrame, sheet_name: str | None = None):
     cols = list(df.columns)
-    id_col = find_column(cols, [r"^id$", r"\bID\b", r"^\s*#\s*$", r"^\s*no\.?\s*$", r"^\s*n°\s*$"])
+    id_col = find_column(
+        cols,
+        [r"^global_id$", r"^global\s*id$", r"^id$", r"\bID\b", r"^\s*#\s*$", r"^\s*no\.?\s*$", r"^\s*n°\s*$"],
+    )
     eng = find_column(cols, [r"^eng", r"anglais", r"english"])
     fr = find_column(cols, [r"^fr", r"franc", r"french"])
 
@@ -118,6 +123,14 @@ def process_sheet(name: str, df: pd.DataFrame, out_root: Path):
     print(f"Wrote {len(lines)} lines to {out_path}")
 
 
+def load_workbook(path: Path):
+    try:
+        return pd.read_excel(path, sheet_name=None, engine="openpyxl")
+    except Exception as e:
+        print(f"Error reading Excel: {e}")
+        sys.exit(3)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser()
     project_root = Path(__file__).resolve().parent.parent
@@ -146,18 +159,15 @@ def main(argv=None):
         print(f"Excel file not found: {excel_path}")
         sys.exit(2)
 
-    try:
-        xl = pd.read_excel(excel_path, sheet_name=None, engine="openpyxl")
-    except Exception as e:
-        print(f"Error reading Excel: {e}")
-        sys.exit(3)
+    xl = load_workbook(excel_path)
+    sheet_map = {sheet: xl[sheet] for sheet in xl.keys() if sheet not in SKIP_SHEETS}
 
-    sheets = args.sheets if args.sheets else list(xl.keys())
+    sheets = args.sheets if args.sheets else list(sheet_map.keys())
     for sheet in sheets:
-        if sheet not in xl:
+        if sheet not in sheet_map:
             print(f"Sheet not found: {sheet}")
             continue
-        df = xl[sheet]
+        df = sheet_map[sheet]
         # Output folder per language: assets/Languages/<SheetTitle>Phrasebook/
         out_root = Path(args.out_dir) / f"{sheet}Phrasebook"
         process_sheet(sheet, df, out_root)
